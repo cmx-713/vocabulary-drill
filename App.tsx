@@ -6,6 +6,7 @@ import TrendChart from './components/TrendChart';
 import QuizTake from './components/QuizTake';
 import { generateClozeTest } from './services/geminiService';
 import { storageService, ACHIEVEMENTS } from './services/storageService';
+import AiTutor from './components/AiTutor';
 import {
   BookOpen,
   Users,
@@ -2465,6 +2466,15 @@ export default function App() {
           </div>
         </main>
         {reportModalJSX}
+        {/* AI 助教悬浮窗 */}
+        <AiTutor studentContext={{
+          studentName: loginForm.studentName,
+          accuracy: userProgress ? Math.round((userProgress.perfectScores / Math.max(userProgress.totalGamesPlayed, 1)) * 100) : null,
+          totalSessions: userProgress?.totalGamesPlayed || 0,
+          lastPracticeDate: userProgress?.lastPracticeDate || '暂无记录',
+          streak: userProgress?.currentStreak || 0,
+          topWrongWords: mistakeStats.slice(0, 8).map(m => ({ term: m.word.term, definition: m.word.definition })),
+        }} />
       </div>
     );
   }

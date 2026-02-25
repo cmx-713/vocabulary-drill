@@ -294,3 +294,32 @@ Output nothing else but the raw JSON.`;
     throw new Error('生成班级诊断失败，请检查 AI 配置或稍后重试。');
   }
 };
+
+/**
+ * 学生端：AI 助教多轮对话（通过 Supabase Edge Function）
+ */
+export const chatWithTutor = async (
+  messages: { role: string; content: string }[],
+  studentContext: {
+    studentName: string;
+    accuracy: number | null;
+    totalSessions: number;
+    lastPracticeDate: string;
+    streak: number;
+    topWrongWords: { term: string; definition: string }[];
+  }
+): Promise<string> => {
+  try {
+    const { data, error } = await supabase.functions.invoke('ai-tutor-chat', {
+      body: { messages, studentContext }
+    });
+
+    if (error) throw error;
+    if (!data || !data.reply) throw new Error("Invalid response from AI Tutor");
+
+    return data.reply;
+  } catch (error) {
+    console.error('AI Tutor chat error:', error);
+    throw new Error('AI 助教暂时无法回复，请稍后再试。');
+  }
+};
