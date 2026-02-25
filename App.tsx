@@ -1916,6 +1916,14 @@ export default function App() {
   }
   // 4. STUDENT VIEW
   if (role === UserRole.STUDENT) {
+    const tutorContext = {
+      studentName: loginForm.studentName,
+      accuracy: userProgress ? Math.round((userProgress.perfectScores / Math.max(userProgress.totalGamesPlayed, 1)) * 100) : null,
+      totalSessions: userProgress?.totalGamesPlayed || 0,
+      lastPracticeDate: userProgress?.lastPracticeDate || '暂无记录',
+      streak: userProgress?.currentStreak || 0,
+      topWrongWords: mistakeStats.slice(0, 8).map(m => ({ term: m.word.term, definition: m.word.definition })),
+    };
     if (view === 'GAME') {
       // Use cached words (computed when entering GAME view)
       let gameWords: Word[] = cachedGameWords;
@@ -1944,6 +1952,7 @@ export default function App() {
               onClose={() => setUnlockedAchievement(null)}
             />
           )}
+          <AiTutor studentContext={tutorContext} />
         </div>
       );
     }
@@ -1974,6 +1983,7 @@ export default function App() {
               refreshData();
             }}
           />
+          <AiTutor studentContext={tutorContext} />
         </div>
       );
     }
@@ -2467,14 +2477,7 @@ export default function App() {
         </main>
         {reportModalJSX}
         {/* AI 助教悬浮窗 */}
-        <AiTutor studentContext={{
-          studentName: loginForm.studentName,
-          accuracy: userProgress ? Math.round((userProgress.perfectScores / Math.max(userProgress.totalGamesPlayed, 1)) * 100) : null,
-          totalSessions: userProgress?.totalGamesPlayed || 0,
-          lastPracticeDate: userProgress?.lastPracticeDate || '暂无记录',
-          streak: userProgress?.currentStreak || 0,
-          topWrongWords: mistakeStats.slice(0, 8).map(m => ({ term: m.word.term, definition: m.word.definition })),
-        }} />
+        <AiTutor studentContext={tutorContext} />
       </div>
     );
   }

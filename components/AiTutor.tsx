@@ -97,12 +97,12 @@ const AiTutor: React.FC<AiTutorProps> = ({ studentContext }) => {
             {!isOpen && (
                 <button
                     onClick={() => setIsOpen(true)}
-                    className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center group"
+                    className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-gradient-to-br from-slate-700 to-slate-800 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center group"
                     title="AI 学习助教"
                 >
                     <Bot size={26} className="group-hover:scale-110 transition-transform" />
                     {/* Pulse animation */}
-                    <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-emerald-400 rounded-full border-2 border-white animate-pulse" />
+                    <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-teal-400 rounded-full border-2 border-white animate-pulse" />
                 </button>
             )}
 
@@ -111,14 +111,14 @@ const AiTutor: React.FC<AiTutorProps> = ({ studentContext }) => {
                 <div className="fixed bottom-6 right-6 z-50 w-[400px] h-[540px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden animate-fade-in"
                     style={{ animation: 'fadeInUp 0.3s ease-out' }}>
                     {/* Header */}
-                    <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white px-5 py-3.5 flex items-center justify-between flex-shrink-0">
+                    <div className="bg-gradient-to-r from-slate-700 to-slate-800 text-white px-5 py-3.5 flex items-center justify-between flex-shrink-0">
                         <div className="flex items-center gap-2.5">
                             <div className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
                                 <Sparkles size={18} />
                             </div>
                             <div>
                                 <h3 className="font-bold text-sm">AI 学习助教</h3>
-                                <p className="text-[10px] text-blue-100 opacity-80">基于你的学情数据，为你个性化辅导</p>
+                                <p className="text-[10px] text-slate-300 opacity-80">基于你的学情数据，为你个性化辅导</p>
                             </div>
                         </div>
                         <button
@@ -142,15 +142,15 @@ const AiTutor: React.FC<AiTutorProps> = ({ studentContext }) => {
                             <div key={idx} className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                                 {/* Avatar */}
                                 <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${msg.role === 'assistant'
-                                        ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white'
-                                        : 'bg-academy-100 text-academy-700'
+                                    ? 'bg-gradient-to-br from-slate-600 to-slate-700 text-white'
+                                    : 'bg-academy-100 text-academy-700'
                                     }`}>
                                     {msg.role === 'assistant' ? <Bot size={14} /> : <User size={14} />}
                                 </div>
                                 {/* Bubble */}
                                 <div className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${msg.role === 'assistant'
-                                        ? 'bg-white border border-gray-100 text-gray-800 shadow-sm rounded-tl-md'
-                                        : 'bg-blue-600 text-white rounded-tr-md'
+                                    ? 'bg-white border border-gray-100 text-gray-800 shadow-sm rounded-tl-md'
+                                    : 'bg-slate-700 text-white rounded-tr-md'
                                     }`}>
                                     {msg.content}
                                 </div>
@@ -160,7 +160,7 @@ const AiTutor: React.FC<AiTutorProps> = ({ studentContext }) => {
                         {/* Loading indicator */}
                         {isLoading && (
                             <div className="flex gap-2">
-                                <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+                                <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-slate-600 to-slate-700 text-white">
                                     <Bot size={14} />
                                 </div>
                                 <div className="bg-white border border-gray-100 px-4 py-3 rounded-2xl rounded-tl-md shadow-sm">
@@ -187,12 +187,12 @@ const AiTutor: React.FC<AiTutorProps> = ({ studentContext }) => {
                                 onKeyDown={handleKeyDown}
                                 placeholder="输入你的问题..."
                                 disabled={isLoading}
-                                className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 disabled:opacity-50 transition-all"
+                                className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400 disabled:opacity-50 transition-all"
                             />
                             <button
                                 onClick={handleSend}
                                 disabled={!input.trim() || isLoading}
-                                className="w-10 h-10 flex items-center justify-center bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-md"
+                                className="w-10 h-10 flex items-center justify-center bg-slate-700 text-white rounded-xl hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-md"
                             >
                                 <Send size={16} />
                             </button>
