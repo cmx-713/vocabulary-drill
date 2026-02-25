@@ -1,0 +1,7 @@
+{
+  "name": "单词听写",
+  "description": "专为大学英语课堂设计的智能单词听写与学情分析工具。支持教师端数据分析与学生端游戏化练习。",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
