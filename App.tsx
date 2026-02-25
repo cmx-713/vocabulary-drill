@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { UserRole, Word, ClassInfo, ClassGroup, StudentRecord, UserProgress, Achievement, TeacherMetrics, QuizQuestion, Quiz } from './types';
 import DictationGame from './components/DictationGame';
 import TrendChart from './components/TrendChart';
@@ -96,10 +97,23 @@ export default function App() {
   const savedSession = localStorage.getItem('LEXITRACK_SESSION');
   const initialSession = savedSession ? JSON.parse(savedSession) : null;
 
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const [role, setRole] = useState<UserRole>(initialSession?.role || UserRole.NONE);
-  const [view, setView] = useState<'LANDING' | 'DASHBOARD' | 'GAME' | 'LEADERBOARD' | 'QUIZ' | 'SETTINGS' | 'CLASS_MANAGE'>(
-    initialSession ? 'DASHBOARD' : 'LANDING'
-  );
+
+  // Derive 'view' from URL pathname
+  type ViewType = 'LANDING' | 'DASHBOARD' | 'GAME' | 'LEADERBOARD' | 'QUIZ' | 'SETTINGS' | 'CLASS_MANAGE';
+  const pathToView: Record<string, ViewType> = useMemo(() => ({
+    '/': initialSession ? 'DASHBOARD' : 'LANDING',
+    '/dashboard': 'DASHBOARD',
+    '/game': 'GAME',
+    '/leaderboard': 'LEADERBOARD',
+    '/quiz': 'QUIZ',
+    '/settings': 'SETTINGS',
+    '/classes': 'CLASS_MANAGE',
+  }), [initialSession]);
+  const view: ViewType = pathToView[location.pathname] || (initialSession ? 'DASHBOARD' : 'LANDING');
 
   // Login State
   const [isLoggedIn, setIsLoggedIn] = useState(!!initialSession);
@@ -249,7 +263,7 @@ export default function App() {
   // --- HANDLERS ---
   const handleRoleSelect = (selectedRole: UserRole) => {
     setRole(selectedRole);
-    setView('DASHBOARD');
+    navigate('/dashboard');
     setLoginError('');
   };
 
@@ -303,7 +317,7 @@ export default function App() {
     setRole(UserRole.NONE);
     setIsLoggedIn(false);
     setLoginForm({ username: '', password: '', studentName: '', studentId: '' });
-    setView('DASHBOARD');
+    navigate('/');
 
   };
 
@@ -391,7 +405,7 @@ export default function App() {
       }
       setDailyPracticeWords(practiceWords);
       setSelectedUnit('DAILY_PRACTICE');
-      setView('GAME');
+      navigate('/game');
     } catch (err) {
       console.error('Failed to load daily practice:', err);
       alert('加载今日练习失败，请重试。');
@@ -437,7 +451,7 @@ export default function App() {
           published_at: new Date().toISOString(),
         };
         setCurrentQuiz(aiQuiz);
-        setView('QUIZ');
+        navigate('/quiz');
       }
     } catch (err: any) {
       alert(err.message || '生成挑战失败');
@@ -913,14 +927,14 @@ export default function App() {
                 active={view === 'DASHBOARD'}
                 icon={<Layout size={20} />}
                 label="班级概览"
-                onClick={() => setView('DASHBOARD')}
+                onClick={() => navigate('/dashboard')}
                 theme="dark"
               />
               <NavItem
                 active={view === 'LEADERBOARD'}
                 icon={<Trophy size={20} />}
                 label="排行榜"
-                onClick={() => setView('LEADERBOARD')}
+                onClick={() => navigate('/leaderboard')}
                 theme="dark"
               />
 
@@ -928,14 +942,14 @@ export default function App() {
                 active={view === 'SETTINGS'}
                 icon={<Settings size={20} />}
                 label="API 设置"
-                onClick={() => setView('SETTINGS')}
+                onClick={() => navigate('/settings')}
                 theme="dark"
               />
               <NavItem
                 active={view === 'CLASS_MANAGE'}
                 icon={<Users size={20} />}
                 label="班级管理"
-                onClick={() => setView('CLASS_MANAGE')}
+                onClick={() => navigate('/classes')}
                 theme="dark"
               />
             </nav>
@@ -1921,7 +1935,7 @@ export default function App() {
             words={gameWords}
             userId={loginForm.studentId}
             onComplete={handleGameComplete}
-            onExit={() => { setCachedGameWords([]); setView('DASHBOARD'); }}
+            onExit={() => { setCachedGameWords([]); navigate('/dashboard'); }}
           />
           {unlockedAchievement && (
             <AchievementModal
@@ -1955,7 +1969,7 @@ export default function App() {
               }
             }}
             onExit={() => {
-              setView('DASHBOARD');
+              navigate('/dashboard');
               refreshData();
             }}
           />
@@ -2001,7 +2015,7 @@ export default function App() {
                           setCachedGameWords(shuffled.slice(0, n));
                           setSelectedUnit(pendingUnit);
                           setPendingUnit(null);
-                          setView('GAME');
+                          navigate('/game');
                         }}
                         className="py-3 rounded-xl border-2 border-academy-200 bg-academy-50 hover:bg-academy-100 hover:border-academy-400 text-academy-800 font-bold text-lg transition-all shadow-sm"
                       >
@@ -2013,7 +2027,7 @@ export default function App() {
                         setCachedGameWords([...unitWords].sort(() => Math.random() - 0.5));
                         setSelectedUnit(pendingUnit);
                         setPendingUnit(null);
-                        setView('GAME');
+                        navigate('/game');
                       }}
                       className="py-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400 text-emerald-800 font-bold text-lg transition-all shadow-sm"
                     >
@@ -2037,7 +2051,7 @@ export default function App() {
                             setCachedGameWords(shuffled.slice(0, val));
                             setSelectedUnit(pendingUnit);
                             setPendingUnit(null);
-                            setView('GAME');
+                            navigate('/game');
                           }
                         }
                       }}
@@ -2052,7 +2066,7 @@ export default function App() {
                           setCachedGameWords(shuffled.slice(0, val));
                           setSelectedUnit(pendingUnit);
                           setPendingUnit(null);
-                          setView('GAME');
+                          navigate('/game');
                         }
                       }}
                       className="bg-academy-700 hover:bg-academy-800 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors shadow-sm"
@@ -2250,7 +2264,7 @@ export default function App() {
                           }`}
                           onClick={() => {
                             setCurrentQuiz(quiz);
-                            setView('QUIZ');
+                            navigate('/quiz');
                           }}
                         >
                           <div className="flex justify-between items-center">
@@ -2404,7 +2418,7 @@ export default function App() {
                 onClick={() => {
                   if (reviewWords.length > 0) {
                     setSelectedUnit('REVIEW_MODE');
-                    setView('GAME');
+                    navigate('/game');
                   }
                 }}
                 disabled={reviewWords.length === 0}
