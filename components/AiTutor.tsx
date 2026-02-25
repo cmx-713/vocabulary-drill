@@ -96,10 +96,10 @@ const AiTutor: React.FC<AiTutorProps> = ({ studentContext }) => {
             {!isOpen && (
                 <button
                     onClick={() => setIsOpen(true)}
-                    className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-amber-400 hover:bg-amber-500 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
+                    className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-gradient-to-br from-amber-400 to-sky-400 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
                     title="AI 学习助教"
                 >
-                    <span className="text-2xl">🐣</span>
+                    <span className="text-2xl">🤖</span>
                     <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full border-2 border-white text-[8px] text-white font-bold flex items-center justify-center">?</span>
                 </button>
             )}
@@ -113,8 +113,8 @@ const AiTutor: React.FC<AiTutorProps> = ({ studentContext }) => {
                     {/* iOS-style Header */}
                     <div className="bg-[#f9f9f9] border-b border-gray-200 px-4 py-3 flex items-center justify-between flex-shrink-0">
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center shadow-sm">
-                                <span className="text-lg">🐣</span>
+                            <div className="w-10 h-10 bg-gradient-to-br from-amber-400 to-sky-400 rounded-full flex items-center justify-center shadow-sm">
+                                <span className="text-lg">🤖</span>
                             </div>
                             <div>
                                 <h3 className="font-semibold text-[15px] text-gray-900">AI 学习助教</h3>
@@ -133,7 +133,7 @@ const AiTutor: React.FC<AiTutorProps> = ({ studentContext }) => {
                     <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2" style={{ background: '#e5e5ea' }}>
                         {messages.length === 0 && !isLoading && (
                             <div className="text-center text-gray-500 text-xs mt-20 space-y-2">
-                                <span className="text-4xl block">🐣</span>
+                                <span className="text-4xl block">🤖</span>
                                 <p>助教正在准备中...</p>
                             </div>
                         )}
@@ -142,8 +142,8 @@ const AiTutor: React.FC<AiTutorProps> = ({ studentContext }) => {
                             <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                 <div
                                     className={`max-w-[78%] px-3.5 py-2 text-[14px] leading-relaxed whitespace-pre-wrap ${msg.role === 'user'
-                                            ? 'bg-[#007AFF] text-white rounded-[18px] rounded-br-[4px]'
-                                            : 'bg-white text-gray-900 rounded-[18px] rounded-bl-[4px] shadow-sm'
+                                        ? 'bg-[#007AFF] text-white rounded-[18px] rounded-br-[4px]'
+                                        : 'bg-white text-gray-900 rounded-[18px] rounded-bl-[4px] shadow-sm'
                                         }`}
                                 >
                                     {msg.content}
