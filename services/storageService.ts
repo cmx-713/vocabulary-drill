@@ -1258,6 +1258,11 @@ export const storageService = {
       overallImprovement: overallLatest - overallFirst,
     };
   },
+
+  // --- Notifications ---
+  sendReminders,
+  getUnreadNotifications,
+  dismissNotifications,
 };
 
 // --- Helper functions ---
@@ -1283,4 +1288,38 @@ function getCategory(unit: string): string {
   if (unit.startsWith('CET-4') || unit.startsWith('CET4')) return 'CET4';
   if (unit.startsWith('CET-6') || unit.startsWith('CET6')) return 'CET6';
   return 'TEXTBOOK';
+}
+
+// --- Notification Functions ---
+
+async function sendReminders(studentIds: string[], message: string) {
+  const rows = studentIds.map(id => ({
+    user_id: id,
+    message,
+    type: 'reminder',
+    is_read: false,
+  }));
+  const { error } = await supabase.from('notifications').insert(rows);
+  if (error) throw error;
+}
+
+async function getUnreadNotifications(userId: string) {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_read', false)
+    .order('created_at', { ascending: false })
+    .limit(5);
+  if (error) throw error;
+  return data || [];
+}
+
+async function dismissNotifications(userId: string) {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ is_read: true })
+    .eq('user_id', userId)
+    .eq('is_read', false);
+  if (error) throw error;
 }

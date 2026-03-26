@@ -46,7 +46,7 @@ import {
   Medal,
   ArrowUp,
   Sparkles,
-  Volume2, Wand2, FileText, Printer, Save, Check, ChevronDown, ChevronUp, Trash2, Edit3, Star, Zap, Send, Search, LogIn, ChevronRight, Info, Calendar, Download, Loader2, Brain, Lightbulb
+  Volume2, Wand2, FileText, Printer, Save, Check, ChevronDown, ChevronUp, Trash2, Edit3, Star, Zap, Send, Search, LogIn, ChevronRight, Info, Calendar, Download, Loader2, Brain, Lightbulb, Bell
 } from 'lucide-react';
 
 const MOCK_CLASSES: ClassGroup[] = [
@@ -201,6 +201,7 @@ export default function App() {
     unitComparisons: { unit: string; firstAccuracy: number; firstDate: string; latestAccuracy: number; latestDate: string; sessionsCount: number; improvement: number }[];
     overallFirst: number; overallLatest: number; overallImprovement: number;
   } | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState<{ id: string; message: string; created_at: string }[]>([]);
 
   // AI Configuration State (Loaded from localStorage)
   const [aiConfig, setAiConfig] = useState({
@@ -247,6 +248,8 @@ export default function App() {
       setActiveQuizzes(quizzes);
       const results = await storageService.getUserQuizResults(userId);
       setQuizResults(results);
+      const notifs = await storageService.getUnreadNotifications(userId);
+      setUnreadNotifications(notifs);
     }
   }, [role, userId, selectedClassId, loginForm.studentName, studentClassId]);
 
@@ -1231,24 +1234,25 @@ export default function App() {
                         </h3>
                         {teacherMetrics?.inactiveStudents && teacherMetrics.inactiveStudents.length > 0 && (
                           <button
-                            onClick={() => {
-                              const students = teacherMetrics.inactiveStudents;
-                              const today = new Date();
-                              const lines = students.map(s => {
-                                const lastDate = new Date(s.lastPracticeDate);
-                                const daysSince = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
-                                return `${s.realName}（已${daysSince}天未练习）`;
-                              });
-                              const text = `📢 英语词汇练习提醒\n\n以下同学已超过7天未进行词汇练习，请尽快完成今日练习：\n\n${lines.join('\n')}\n\n🔗 练习入口：${window.location.origin}\n⏰ 坚持每天练习，进步才能看得见！`;
-                              navigator.clipboard.writeText(text).then(() => {
-                                const btn = document.getElementById('copy-reminder-btn');
-                                if (btn) { btn.textContent = '✓ 已复制'; setTimeout(() => { btn.textContent = '📋 复制提醒到微信'; }, 2000); }
-                              });
+                            onClick={async () => {
+                              const btn = document.getElementById('send-app-reminder-btn');
+                              if (btn) { btn.innerHTML = '<span class="animate-spin mr-1">↻</span> 发送中...'; btn.setAttribute('disabled', 'true'); }
+                              try {
+                                const students = teacherMetrics.inactiveStudents;
+                                const today = new Date();
+                                const studentIds = students.map(s => s.userId);
+                                const message = `📢 词汇练习提醒：你已超过7天未进行词汇练习，请尽快完成今日练习！坚持每天练习，进步才能看得见！`;
+                                await storageService.sendReminders(studentIds, message);
+                                if (btn) { btn.innerHTML = '✓ 已一键提醒'; setTimeout(() => { btn.innerHTML = '🔔 站内一键提醒'; btn.removeAttribute('disabled'); }, 3000); }
+                              } catch (e) {
+                                alert('提醒发送失败，请重试');
+                                if (btn) { btn.innerHTML = '🔔 站内一键提醒'; btn.removeAttribute('disabled'); }
+                              }
                             }}
-                            id="copy-reminder-btn"
-                            className="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg transition-colors font-semibold shadow-sm"
+                            id="send-app-reminder-btn"
+                            className="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg transition-colors font-semibold shadow-sm flex items-center"
                           >
-                            📋 复制提醒到微信
+                            🔔 站内一键提醒
                           </button>
                         )}
                       </div>
@@ -2058,6 +2062,37 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-gray-50 pb-20 relative">
+        {/* Student Notifications Banner */}
+        {unreadNotifications.length > 0 && (
+          <div className="bg-amber-50 border-b border-amber-200 p-3 sm:px-6 fixed top-0 w-full z-40 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm animate-fade-in">
+            <div className="flex items-start sm:items-center gap-3 w-full sm:w-auto mb-2 sm:mb-0">
+              <div className="bg-amber-100 p-1.5 flex-shrink-0 rounded-full text-amber-600 hidden sm:block">
+                <Bell size={16} className="animate-pulse" />
+              </div>
+              <div>
+                {unreadNotifications.map(notif => (
+                  <p key={notif.id} className="text-amber-800 text-sm font-medium flex items-center gap-1.5">
+                    <span className="sm:hidden text-amber-600"><Bell size={14} className="animate-pulse" inline="true" /></span>
+                    {notif.message}
+                  </p>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                await storageService.dismissNotifications(userId);
+                setUnreadNotifications([]);
+              }}
+              className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+            >
+              <CheckCircle2 size={16} /> 这就去练
+            </button>
+          </div>
+        )}
+
+        {/* Global Padding adjustment for banner */}
+        <div className={unreadNotifications.length > 0 ? "pt-24 sm:pt-16" : ""}></div>
+
         {/* Achievement Modal Overlay (if on dashboard) */}
         {unlockedAchievement && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
