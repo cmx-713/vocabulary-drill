@@ -168,6 +168,8 @@ export default function App() {
   const [quizModalOpen, setQuizModalOpen] = useState(false);
   const [dailyPracticeWords, setDailyPracticeWords] = useState<Word[]>([]);
   const [loadingDailyPractice, setLoadingDailyPractice] = useState(false);
+  const [errorWordBook, setErrorWordBook] = useState<string>('ALL');
+  const [errorWordUnit, setErrorWordUnit] = useState<string>('ALL');
   const [quizCompletionStats, setQuizCompletionStats] = useState<{
     quizId: string; title: string; publishedAt: string;
     totalStudents: number; completedCount: number; averageScore: number; completionRate: number;
@@ -1129,10 +1131,10 @@ export default function App() {
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
                     {/* Top Error Words Section */}
                     <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col relative">
-                      <div className="flex justify-between items-center p-6 pb-0 mb-4">
+                      <div className="flex justify-between items-center p-6 pb-0 mb-2">
                         <h3 onClick={() => { const s = new Set(collapsedSections); s.has('errorWords') ? s.delete('errorWords') : s.add('errorWords'); setCollapsedSections(s); }}
                           className="font-bold text-lg text-gray-800 flex items-center gap-2 cursor-pointer select-none hover:text-academy-600 transition-colors">
-                          <AlertTriangle size={20} className="text-red-500" /> 全班易错词 Top 10
+                          <AlertTriangle size={20} className="text-red-500" /> 全班易错词 {errorWordBook === 'ALL' ? 'Top 10' : ''}
                           {collapsedSections.has('errorWords') ? <ChevronDown size={18} className="text-gray-400" /> : <ChevronUp size={18} className="text-gray-400" />}
                         </h3>
                         <button
@@ -1148,34 +1150,75 @@ export default function App() {
                           智能生成测验卷
                         </button>
                       </div>
+                      {/* Filter Bar */}
+                      {!collapsedSections.has('errorWords') && (
+                        <div className="px-6 pb-2 flex flex-wrap items-center gap-2">
+                          <select
+                            value={errorWordBook}
+                            onChange={e => { setErrorWordBook(e.target.value); setErrorWordUnit('ALL'); }}
+                            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-gray-50 text-gray-700 focus:outline-none focus:ring-1 focus:ring-academy-400"
+                          >
+                            <option value="ALL">全部教材</option>
+                            {TEXTBOOK_SERIES.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                            <option value="CET4">CET-4</option>
+                            <option value="CET6">CET-6</option>
+                          </select>
+                          {errorWordBook !== 'ALL' && (
+                            <select
+                              value={errorWordUnit}
+                              onChange={e => setErrorWordUnit(e.target.value)}
+                              className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-gray-50 text-gray-700 focus:outline-none focus:ring-1 focus:ring-academy-400"
+                            >
+                              <option value="ALL">全部单元</option>
+                              {errorWordBook.startsWith('NHRW')
+                                ? UNIT_LIST.map(u => <option key={u} value={`${errorWordBook}-${u}`}>{u}</option>)
+                                : (errorWordBook === 'CET4' ? CET_SETS.CET4 : CET_SETS.CET6).map(s => <option key={s} value={s}>{s}</option>)
+                              }
+                            </select>
+                          )}
+                          {errorWordBook !== 'ALL' && (
+                            <button onClick={() => { setErrorWordBook('ALL'); setErrorWordUnit('ALL'); }} className="text-[10px] text-gray-400 hover:text-red-500 transition-colors">× 清除筛选</button>
+                          )}
+                        </div>
+                      )}
                       {!collapsedSections.has('errorWords') && (
                         <div className="flex-1 overflow-y-auto space-y-2 max-h-[400px] px-6 pb-6 pr-4">
-                          {teacherMetrics?.topErrorWords.map(({ word, errorCount, totalAttempts }) => {
-                            const errorRate = totalAttempts > 0 ? ((errorCount / totalAttempts) * 100).toFixed(1) : 0;
-                            return (
-                              <div key={word.id} className="flex justify-between items-center p-3 bg-red-50/30 rounded-lg border border-red-100/50">
-                                <div>
-                                  <p className="font-bold text-gray-800 font-serif">{word.term}</p>
-                                  <p className="text-xs text-gray-500">{word.definition}</p>
+                          {(() => {
+                            const filteredWords = (teacherMetrics?.topErrorWords || []).filter(({ word }) => {
+                              if (errorWordBook === 'ALL') return true;
+                              if (errorWordUnit !== 'ALL') return word.unit === errorWordUnit;
+                              if (errorWordBook.startsWith('NHRW')) return word.unit.startsWith(errorWordBook + '-');
+                              if (errorWordBook === 'CET4') return word.unit.startsWith('CET-4');
+                              if (errorWordBook === 'CET6') return word.unit.startsWith('CET-6');
+                              return true;
+                            }).slice(0, errorWordBook === 'ALL' ? 10 : 20);
+                            return filteredWords.length > 0 ? filteredWords.map(({ word, errorCount, totalAttempts }) => {
+                              const errorRate = totalAttempts > 0 ? ((errorCount / totalAttempts) * 100).toFixed(1) : 0;
+                              return (
+                                <div key={word.id} className="flex justify-between items-center p-3 bg-red-50/30 rounded-lg border border-red-100/50">
+                                  <div>
+                                    <p className="font-bold text-gray-800 font-serif">{word.term}</p>
+                                    <p className="text-xs text-gray-500">{word.definition}</p>
+                                    {errorWordBook === 'ALL' && <p className="text-[10px] text-gray-400 mt-0.5">{word.unit}</p>}
+                                  </div>
+                                  <div className="text-right flex items-center gap-4">
+                                    <div className="text-center hidden sm:block">
+                                      <span className="text-sm font-bold text-gray-700">{totalAttempts}<span className="text-[10px] text-gray-400 font-bold ml-1">次测试</span></span>
+                                    </div>
+                                    <div className="text-center bg-red-100 px-3 py-1 rounded-md hidden sm:block">
+                                      <span className="text-sm font-bold text-red-600">{errorCount}<span className="text-[10px] text-red-400 font-bold ml-1">次错误</span></span>
+                                    </div>
+                                    <div className="text-center min-w-[3.5rem]">
+                                      <span className="text-base font-bold text-red-700 font-mono">{errorRate}%</span>
+                                      <p className="text-[9px] text-gray-500 uppercase tracking-tighter">错误率</p>
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="text-right flex items-center gap-4">
-                                  <div className="text-center hidden sm:block">
-                                    <span className="text-sm font-bold text-gray-700">{totalAttempts}<span className="text-[10px] text-gray-400 font-bold ml-1">次测试</span></span>
-                                  </div>
-                                  <div className="text-center bg-red-100 px-3 py-1 rounded-md hidden sm:block">
-                                    <span className="text-sm font-bold text-red-600">{errorCount}<span className="text-[10px] text-red-400 font-bold ml-1">次错误</span></span>
-                                  </div>
-                                  <div className="text-center min-w-[3.5rem]">
-                                    <span className="text-base font-bold text-red-700 font-mono">{errorRate}%</span>
-                                    <p className="text-[9px] text-gray-500 uppercase tracking-tighter">错误率</p>
-                                  </div>
-                                </div>
-                              </div>
+                              );
+                            }) : (
+                              <p className="text-center text-gray-400 py-8 text-sm italic">暂无易错词数据</p>
                             );
-                          })}
-                          {(!teacherMetrics?.topErrorWords || teacherMetrics.topErrorWords.length === 0) && (
-                            <p className="text-center text-gray-400 py-8 text-sm italic">暂无易错词数据</p>
-                          )}
+                          })()}
                         </div>
                       )}
                     </div>

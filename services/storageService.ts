@@ -369,7 +369,7 @@ export const storageService = {
     const sortedErrorIds = Array.from(wordStatsMap.entries())
       .filter((a) => a[1].errors > 0)
       .sort((a, b) => b[1].errors - a[1].errors)
-      .slice(0, 10);
+      .slice(0, 50);
 
     let topErrorWords: { word: Word; errorCount: number; totalAttempts: number }[] = [];
     if (sortedErrorIds.length > 0) {
