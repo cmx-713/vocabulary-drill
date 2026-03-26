@@ -51,6 +51,10 @@ const INITIAL_PROGRESS: UserProgress = {
   realName: ''
 };
 
+// In-memory cache for word bank to save Supabase Egress
+let cachedAllWords: Word[] | null = null;
+let cachedAllWordsTime: number = 0;
+
 export const storageService = {
   // No init needed for Supabase — DB is always ready
   init: () => { },
@@ -141,8 +145,14 @@ export const storageService = {
     return { valid: true, className, classId: data.class_id };
   },
 
-  // Get all words from Supabase
-  getWords: async (): Promise<Word[]> => {
+  // Get all words from Supabase (with in-memory caching to save Egress bandwidth)
+  getWords: async (forceRefresh = false): Promise<Word[]> => {
+    const now = Date.now();
+    // Cache for 1 hour
+    if (!forceRefresh && cachedAllWords && (now - cachedAllWordsTime < 1000 * 60 * 60)) {
+      return cachedAllWords;
+    }
+
     const { data, error } = await supabase
       .from('words')
       .select('*')
@@ -150,11 +160,14 @@ export const storageService = {
 
     if (error) {
       console.error('Error fetching words:', error);
-      return [];
+      return cachedAllWords || [];
     }
 
     // Map DB snake_case to frontend camelCase
-    return (data || []).map(mapDbWordToWord);
+    const words = (data || []).map(mapDbWordToWord);
+    cachedAllWords = words;
+    cachedAllWordsTime = now;
+    return words;
   },
 
   // Get words by unit
