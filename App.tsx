@@ -1225,9 +1225,33 @@ export default function App() {
 
                     {/* Inactive Students Section */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col">
-                      <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center gap-2">
-                        <Clock size={20} className="text-amber-500" /> 懒惰提醒 (超过 7 天未练)
-                      </h3>
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                          <Clock size={20} className="text-amber-500" /> 懒惰提醒 (超过 7 天未练)
+                        </h3>
+                        {teacherMetrics?.inactiveStudents && teacherMetrics.inactiveStudents.length > 0 && (
+                          <button
+                            onClick={() => {
+                              const students = teacherMetrics.inactiveStudents;
+                              const today = new Date();
+                              const lines = students.map(s => {
+                                const lastDate = new Date(s.lastPracticeDate);
+                                const daysSince = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+                                return `${s.realName}（已${daysSince}天未练习）`;
+                              });
+                              const text = `📢 英语词汇练习提醒\n\n以下同学已超过7天未进行词汇练习，请尽快完成今日练习：\n\n${lines.join('\n')}\n\n🔗 练习入口：${window.location.origin}\n⏰ 坚持每天练习，进步才能看得见！`;
+                              navigator.clipboard.writeText(text).then(() => {
+                                const btn = document.getElementById('copy-reminder-btn');
+                                if (btn) { btn.textContent = '✓ 已复制'; setTimeout(() => { btn.textContent = '📋 复制提醒到微信'; }, 2000); }
+                              });
+                            }}
+                            id="copy-reminder-btn"
+                            className="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg transition-colors font-semibold shadow-sm"
+                          >
+                            📋 复制提醒到微信
+                          </button>
+                        )}
+                      </div>
                       <div className="flex-1 overflow-y-auto space-y-2 max-h-[400px] pr-2">
                         {teacherMetrics?.inactiveStudents.map(student => (
                           <div key={student.userId} className="flex justify-between items-center p-3 bg-amber-50/30 rounded-lg border border-amber-100/50">
