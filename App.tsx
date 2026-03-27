@@ -2595,6 +2595,19 @@ export default function App() {
                   暂无错题记录。继续保持！
                 </div>
               )}
+              {mistakeStats.length > 0 && (
+                <button
+                  onClick={() => {
+                    const errorWords = mistakeStats.map(s => s.word);
+                    setCachedGameWords(errorWords);
+                    setSelectedUnit('ERROR_WORDS');
+                    navigate('/game');
+                  }}
+                  className="mt-4 w-full py-2.5 rounded-xl bg-red-50 hover:bg-red-100 active:scale-95 border border-red-200 text-red-600 font-semibold text-sm transition-all flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Target size={16} /> 专练这些高频错词
+                </button>
+              )}
             </div>
           </div>
         </main>
