@@ -1098,18 +1098,19 @@ export const storageService = {
     ];
     const uniqueWordIds = [...new Set(allNeededWordIds)];
 
-    let wordsMap: Record<string, { term: string; definition: string }> = {};
+    let wordsMap: Record<string, { term: string; definition: string; unit: string }> = {};
     if (uniqueWordIds.length > 0) {
       const { data: words } = await supabase
         .from('words')
-        .select('id, term, definition')
+        .select('id, term, definition, unit')
         .in('id', uniqueWordIds);
-      (words || []).forEach(w => { wordsMap[w.id] = { term: w.term, definition: w.definition }; });
+      (words || []).forEach(w => { wordsMap[w.id] = { term: w.term, definition: w.definition, unit: w.unit || '' }; });
     }
 
     const topErrorWords = errorStates.map(s => ({
       term: wordsMap[s.word_id]?.term || '(unknown)',
       definition: wordsMap[s.word_id]?.definition || '',
+      unit: wordsMap[s.word_id]?.unit || '',
       errorCount: s.error_count,
       totalAttempts: s.total_attempts || 0,
     }));

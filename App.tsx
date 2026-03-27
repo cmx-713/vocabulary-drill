@@ -746,20 +746,31 @@ export default function App() {
                       <th className="text-left py-2 px-4 text-gray-500 text-xs">#</th>
                       <th className="text-left py-2 px-4 text-gray-500 text-xs">单词</th>
                       <th className="text-left py-2 px-4 text-gray-500 text-xs">释义</th>
+                      <th className="text-left py-2 px-4 text-gray-500 text-xs hidden sm:table-cell">来源</th>
                       <th className="text-center py-2 px-4 text-gray-500 text-xs">错误次数</th>
                       <th className="text-center py-2 px-4 text-gray-500 text-xs">错误率</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {studentReport.topErrorWords.map((w, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="py-2 px-4 font-mono text-gray-400">{i + 1}</td>
-                        <td className="py-2 px-4 font-bold text-gray-800 font-serif">{w.term}</td>
-                        <td className="py-2 px-4 text-gray-500 text-xs">{w.definition}</td>
-                        <td className="py-2 px-4 text-center font-bold text-red-600">{w.errorCount}</td>
-                        <td className="py-2 px-4 text-center text-red-700 font-mono">{w.totalAttempts > 0 ? Math.round((w.errorCount / w.totalAttempts) * 100) : 0}%</td>
-                      </tr>
-                    ))}
+                    {studentReport.topErrorWords.map((w, i) => {
+                      const unitLabel = (w as any).unit
+                        ? (w as any).unit.replace(/-/g, ' ').replace('NHRW', 'NHRW ').trim()
+                        : '';
+                      return (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="py-2 px-4 font-mono text-gray-400">{i + 1}</td>
+                          <td className="py-2 px-4 font-bold text-gray-800 font-serif">{w.term}</td>
+                          <td className="py-2 px-4 text-gray-500 text-xs">{w.definition}</td>
+                          <td className="py-2 px-4 hidden sm:table-cell">
+                            {unitLabel ? (
+                              <span className="inline-block text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full font-medium whitespace-nowrap">{unitLabel}</span>
+                            ) : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          <td className="py-2 px-4 text-center font-bold text-red-600">{w.errorCount}</td>
+                          <td className="py-2 px-4 text-center text-red-700 font-mono">{w.totalAttempts > 0 ? Math.round((w.errorCount / w.totalAttempts) * 100) : 0}%</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2554,20 +2565,30 @@ export default function App() {
 
               {mistakeStats.length > 0 ? (
                 <div className="space-y-3">
-                  {mistakeStats.map((stat, idx) => (
-                    <div key={stat.word.id} className="flex items-center gap-3 text-sm">
-                      <span className={`font-mono font-bold w-4 text-center ${idx < 3 ? 'text-red-500' : 'text-gray-400'}`}>{idx + 1}</span>
-                      <div className="flex-1">
-                        <div className="flex justify-between mb-1">
-                          <span className="font-medium text-gray-700">{stat.word.term}</span>
-                          <span className="text-xs text-gray-500">{stat.errorCount} 错误</span>
-                        </div>
-                        <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
-                          <div className="bg-red-400 h-full" style={{ width: `${Math.min((stat.errorCount / 5) * 100, 100)}%` }}></div>
+                  {mistakeStats.map((stat, idx) => {
+                    const unitLabel = stat.word.unit
+                      ? stat.word.unit.replace(/-/g, ' ').trim()
+                      : '';
+                    return (
+                      <div key={stat.word.id} className="flex items-center gap-3 text-sm">
+                        <span className={`font-mono font-bold w-4 text-center ${idx < 3 ? 'text-red-500' : 'text-gray-400'}`}>{idx + 1}</span>
+                        <div className="flex-1">
+                          <div className="flex justify-between mb-1 items-start">
+                            <div>
+                              <span className="font-medium text-gray-700">{stat.word.term}</span>
+                              {unitLabel && (
+                                <span className="ml-2 text-xs bg-blue-50 text-blue-500 border border-blue-100 px-1.5 py-0.5 rounded-full">{unitLabel}</span>
+                              )}
+                            </div>
+                            <span className="text-xs text-gray-500 ml-2 shrink-0">{stat.errorCount} 错误</span>
+                          </div>
+                          <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                            <div className="bg-red-400 h-full" style={{ width: `${Math.min((stat.errorCount / 5) * 100, 100)}%` }}></div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-6 text-sm text-gray-400">
