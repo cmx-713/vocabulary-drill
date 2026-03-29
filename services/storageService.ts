@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { Word, ClassInfo, ClassGroup, StudentRecord, UserProgress, Achievement, WordLearningState, TeacherMetrics, Quiz } from '../types';
+import { Word, ClassInfo, ClassGroup, StudentRecord, UserProgress, Achievement, WordLearningState, TeacherMetrics, Quiz, LearningPlan } from '../types';
 
 // Ebbinghaus intervals (in days)
 const EBBINGHAUS_INTERVALS = [1, 2, 4, 7, 15, 30];
@@ -1337,6 +1337,65 @@ export const storageService = {
     return map;
   },
 
+  // --- Learning Plans ---
+
+  getActivePlan: async (userId: string): Promise<LearningPlan | null> => {
+    const { data } = await supabase
+      .from('learning_plans')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('week_start', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!data) return null;
+    return mapDbPlanToPlan(data);
+  },
+
+  upsertPlan: async (plan: Omit<LearningPlan, 'id'>): Promise<LearningPlan | null> => {
+    const { data, error } = await supabase
+      .from('learning_plans')
+      .upsert({
+        user_id: plan.userId,
+        week_start: plan.weekStart,
+        target_new_words: plan.targetNewWords,
+        target_review_words: plan.targetReviewWords,
+        target_sessions: plan.targetSessions,
+        completed_new_words: plan.completedNewWords,
+        completed_review_words: plan.completedReviewWords,
+        completed_sessions: plan.completedSessions,
+        focus_word_ids: plan.focusWordIds,
+        status: plan.status,
+      }, { onConflict: 'user_id,week_start' })
+      .select()
+      .single();
+
+    if (error) { console.error('Error upserting plan:', error); return null; }
+    return mapDbPlanToPlan(data);
+  },
+
+  updatePlanProgress: async (userId: string, newWords: number, reviewWords: number) => {
+    const plan = await storageService.getActivePlan(userId);
+    if (!plan) return;
+
+    const updated = {
+      ...plan,
+      completedNewWords: plan.completedNewWords + newWords,
+      completedReviewWords: plan.completedReviewWords + reviewWords,
+      completedSessions: plan.completedSessions + 1,
+    };
+
+    // Auto-complete if all targets met
+    if (updated.completedNewWords >= plan.targetNewWords &&
+        updated.completedReviewWords >= plan.targetReviewWords &&
+        updated.completedSessions >= plan.targetSessions) {
+      updated.status = 'completed';
+    }
+
+    await storageService.upsertPlan(updated);
+  },
+
   // --- Notifications ---
   sendReminders,
   getUnreadNotifications,
@@ -1400,4 +1459,20 @@ async function dismissNotifications(userId: string) {
     .eq('user_id', userId)
     .eq('is_read', false);
   if (error) throw error;
+}
+
+function mapDbPlanToPlan(row: any): LearningPlan {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    weekStart: row.week_start,
+    targetNewWords: row.target_new_words,
+    targetReviewWords: row.target_review_words,
+    targetSessions: row.target_sessions,
+    completedNewWords: row.completed_new_words,
+    completedReviewWords: row.completed_review_words,
+    completedSessions: row.completed_sessions,
+    focusWordIds: row.focus_word_ids || [],
+    status: row.status,
+  };
 }

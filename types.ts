@@ -116,6 +116,20 @@ export interface AppState {
 export type AlertSeverity = 'critical' | 'warning' | 'info';
 export type AlertCategory = 'accuracy_drop' | 'error_word_spike' | 'stagnation' | 'mastery_regression';
 
+export interface LearningPlan {
+  id: string;
+  userId: string;
+  weekStart: string;
+  targetNewWords: number;
+  targetReviewWords: number;
+  targetSessions: number;
+  completedNewWords: number;
+  completedReviewWords: number;
+  completedSessions: number;
+  focusWordIds: string[];
+  status: 'active' | 'completed' | 'expired';
+}
+
 export interface AgentAlert {
   id: string;
   category: AlertCategory;

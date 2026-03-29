@@ -1,4 +1,4 @@
-import { AgentAlert, AlertCategory, AlertSeverity, Word } from '../types';
+import { AgentAlert, AlertCategory, AlertSeverity, Word, LearningPlan } from '../types';
 import { storageService } from './storageService';
 
 let alertIdCounter = 0;
@@ -471,4 +471,76 @@ function editDistance(a: string, b: string): number {
     }
   }
   return dp[m][n];
+}
+
+// ═══════════════════════════════════════════════════════
+// Phase 3: Personalized Learning Plan Generation
+// ═══════════════════════════════════════════════════════
+
+export async function generatePersonalPlan(userId: string): Promise<LearningPlan> {
+  const today = new Date();
+  // Week starts on Monday
+  const dayOfWeek = today.getDay();
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + mondayOffset);
+  const weekStart = monday.toISOString().split('T')[0];
+
+  // Check if a plan already exists for this week
+  const existing = await storageService.getActivePlan(userId);
+  if (existing && existing.weekStart === weekStart) {
+    return existing;
+  }
+
+  // Expire old active plans
+  if (existing && existing.weekStart !== weekStart) {
+    await storageService.upsertPlan({ ...existing, status: 'expired' });
+  }
+
+  // Gather student data to calibrate targets
+  const todayStr = today.toISOString().split('T')[0];
+
+  const [dueStates, errorStates, allPracticedStates] = await Promise.all([
+    storageService.getDueReviewWords(userId, 100),
+    storageService.getMistakeStats(userId),
+    storageService.getWords(), // for counting total available
+  ]);
+
+  // Count words the student has already studied
+  const { data: studiedStates } = await (await import('./supabaseClient')).supabase
+    .from('word_learning_states')
+    .select('word_id, interval_days, error_count')
+    .eq('user_id', userId);
+
+  const studied = studiedStates || [];
+  const totalAvailable = allPracticedStates.length;
+  const studiedCount = studied.length;
+  const masteredCount = studied.filter(s => s.interval_days >= 7).length;
+  const dueReviewCount = dueStates.length;
+  const highErrorCount = errorStates.length;
+
+  // Adaptive target calculation based on student's current state
+  const unseenCount = totalAvailable - studiedCount;
+  const targetNewWords = Math.min(Math.max(5, Math.round(unseenCount * 0.05)), 20);
+  const targetReviewWords = Math.min(Math.max(10, dueReviewCount + highErrorCount), 40);
+  const targetSessions = Math.max(3, Math.min(7, Math.round((targetNewWords + targetReviewWords) / 8)));
+
+  // Focus words: top error words that need attention
+  const focusWordIds = errorStates.slice(0, 5).map(e => e.word.id);
+
+  const plan: Omit<LearningPlan, 'id'> = {
+    userId,
+    weekStart,
+    targetNewWords,
+    targetReviewWords,
+    targetSessions,
+    completedNewWords: 0,
+    completedReviewWords: 0,
+    completedSessions: 0,
+    focusWordIds,
+    status: 'active',
+  };
+
+  const saved = await storageService.upsertPlan(plan);
+  return saved || { id: 'temp', ...plan };
 }

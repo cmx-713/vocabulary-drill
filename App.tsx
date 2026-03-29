@@ -7,6 +7,7 @@ import QuizTake from './components/QuizTake';
 import { generateClozeTest } from './services/geminiService';
 import { storageService, ACHIEVEMENTS } from './services/storageService';
 import AiTutor from './components/AiTutor';
+import LearningPlanCard from './components/LearningPlan';
 import { runAgentAnalysis } from './services/agentService';
 import {
   BookOpen,
@@ -506,6 +507,11 @@ export default function App() {
       const totalCount = results.correct.length + results.wrong.length + results.almost.length;
       await storageService.savePracticeSession(userId, selectedUnit, correctCount, totalCount);
     }
+
+    // Update learning plan progress
+    const newWordCount = results.correct.filter(id => !results.wrong.includes(id)).length;
+    const reviewCount = results.correct.length;
+    storageService.updatePlanProgress(userId, newWordCount, reviewCount).catch(() => {});
 
     // Refresh review list and stats
     await refreshData();
@@ -2462,6 +2468,9 @@ export default function App() {
                   <div className="text-3xl font-bold text-emerald-700 font-sans">{userProgress?.perfectScores || 0}</div>
                 </div>
               </div>
+
+              {/* AI Learning Plan */}
+              <LearningPlanCard userId={loginForm.studentId} />
 
               {/* Student Self Report Card */}
               <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
