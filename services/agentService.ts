@@ -1,5 +1,6 @@
-import { AgentAlert, AlertCategory, AlertSeverity, Word, LearningPlan } from '../types';
+import { AgentAlert, AlertCategory, AlertSeverity, Word, LearningPlan, AlertOutcome } from '../types';
 import { storageService } from './storageService';
+import { supabase } from './supabaseClient';
 
 let alertIdCounter = 0;
 function nextAlertId(): string {
@@ -50,7 +51,41 @@ export async function runAgentAnalysis(classId: string | null): Promise<AgentAle
   }
 
   const severityOrder: Record<AlertSeverity, number> = { critical: 3, warning: 2, info: 1 };
-  return alerts.sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity]);
+  const sorted = alerts.sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity]);
+
+  // Phase 4: Persist alerts for feedback loop (fire-and-forget, non-blocking)
+  persistAlerts(sorted).catch(() => {});
+
+  return sorted;
+}
+
+async function persistAlerts(alerts: AgentAlert[]) {
+  if (alerts.length === 0) return;
+
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: recent } = await supabase
+    .from('alert_outcomes')
+    .select('alert_category, related_user_id')
+    .gte('created_at', oneDayAgo);
+
+  const recentKeys = new Set((recent || []).map(r => `${r.alert_category}::${r.related_user_id || ''}`));
+
+  const rows = alerts
+    .filter(a => !recentKeys.has(`${a.category}::${a.relatedStudents?.[0] || ''}`))
+    .map(a => {
+      const metricMatch = a.description.match(/(\d+)%/);
+      return {
+        alert_category: a.category,
+        alert_severity: a.severity,
+        related_user_id: a.relatedStudents?.[0] || null,
+        related_word_id: a.relatedWords?.[0] || null,
+        metric_at_alert: metricMatch ? parseFloat(metricMatch[1]) : null,
+      };
+    });
+
+  if (rows.length > 0) {
+    await supabase.from('alert_outcomes').insert(rows);
+  }
 }
 
 // ─── Detector 1: Accuracy Drop ───
@@ -492,22 +527,26 @@ export async function generatePersonalPlan(userId: string): Promise<LearningPlan
     return existing;
   }
 
-  // Expire old active plans
+  // Feedback loop: evaluate last week's plan completion rate to adjust this week's targets
+  let previousCompletionRate: number | undefined;
   if (existing && existing.weekStart !== weekStart) {
-    await storageService.upsertPlan({ ...existing, status: 'expired' });
+    const prev = existing;
+    const completionRates = [
+      prev.targetNewWords > 0 ? prev.completedNewWords / prev.targetNewWords : 1,
+      prev.targetReviewWords > 0 ? prev.completedReviewWords / prev.targetReviewWords : 1,
+      prev.targetSessions > 0 ? prev.completedSessions / prev.targetSessions : 1,
+    ];
+    previousCompletionRate = Math.round((completionRates.reduce((a, b) => a + b, 0) / 3) * 100);
+    await storageService.upsertPlan({ ...prev, status: 'expired' });
   }
-
-  // Gather student data to calibrate targets
-  const todayStr = today.toISOString().split('T')[0];
 
   const [dueStates, errorStates, allPracticedStates] = await Promise.all([
     storageService.getDueReviewWords(userId, 100),
     storageService.getMistakeStats(userId),
-    storageService.getWords(), // for counting total available
+    storageService.getWords(),
   ]);
 
-  // Count words the student has already studied
-  const { data: studiedStates } = await (await import('./supabaseClient')).supabase
+  const { data: studiedStates } = await supabase
     .from('word_learning_states')
     .select('word_id, interval_days, error_count')
     .eq('user_id', userId);
@@ -515,17 +554,32 @@ export async function generatePersonalPlan(userId: string): Promise<LearningPlan
   const studied = studiedStates || [];
   const totalAvailable = allPracticedStates.length;
   const studiedCount = studied.length;
-  const masteredCount = studied.filter(s => s.interval_days >= 7).length;
   const dueReviewCount = dueStates.length;
   const highErrorCount = errorStates.length;
 
-  // Adaptive target calculation based on student's current state
+  // Base targets from student state
   const unseenCount = totalAvailable - studiedCount;
-  const targetNewWords = Math.min(Math.max(5, Math.round(unseenCount * 0.05)), 20);
-  const targetReviewWords = Math.min(Math.max(10, dueReviewCount + highErrorCount), 40);
-  const targetSessions = Math.max(3, Math.min(7, Math.round((targetNewWords + targetReviewWords) / 8)));
+  let targetNewWords = Math.min(Math.max(5, Math.round(unseenCount * 0.05)), 20);
+  let targetReviewWords = Math.min(Math.max(10, dueReviewCount + highErrorCount), 40);
+  let targetSessions = Math.max(3, Math.min(7, Math.round((targetNewWords + targetReviewWords) / 8)));
 
-  // Focus words: top error words that need attention
+  // Closed-loop adjustment: scale targets based on last week's completion
+  if (previousCompletionRate !== undefined) {
+    if (previousCompletionRate > 90) {
+      // Student crushed it — raise the bar
+      const scale = 1.2;
+      targetNewWords = Math.min(25, Math.round(targetNewWords * scale));
+      targetReviewWords = Math.min(50, Math.round(targetReviewWords * scale));
+      targetSessions = Math.min(10, Math.round(targetSessions * scale));
+    } else if (previousCompletionRate < 40) {
+      // Student struggled — lower the bar to build momentum
+      const scale = 0.7;
+      targetNewWords = Math.max(3, Math.round(targetNewWords * scale));
+      targetReviewWords = Math.max(5, Math.round(targetReviewWords * scale));
+      targetSessions = Math.max(2, Math.round(targetSessions * scale));
+    }
+  }
+
   const focusWordIds = errorStates.slice(0, 5).map(e => e.word.id);
 
   const plan: Omit<LearningPlan, 'id'> = {
@@ -539,8 +593,105 @@ export async function generatePersonalPlan(userId: string): Promise<LearningPlan
     completedSessions: 0,
     focusWordIds,
     status: 'active',
+    previousCompletionRate,
   };
 
   const saved = await storageService.upsertPlan(plan);
   return saved || { id: 'temp', ...plan };
+}
+
+// ═══════════════════════════════════════════════════════
+// Phase 4: Feedback Loop — Self-Reflection Engine
+// ═══════════════════════════════════════════════════════
+
+export interface AlertEvaluation {
+  totalEvaluated: number;
+  resolvedCount: number;
+  effectivenessRate: number;
+}
+
+export async function evaluateAlertOutcomes(): Promise<AlertEvaluation> {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+
+  // Find alerts older than 7 days that haven't been evaluated yet
+  const { data: pending } = await supabase
+    .from('alert_outcomes')
+    .select('*')
+    .lte('created_at', sevenDaysAgo)
+    .is('evaluated_at', null)
+    .limit(50);
+
+  if (!pending || pending.length === 0) {
+    // Return stats from already-evaluated alerts
+    const { data: all } = await supabase
+      .from('alert_outcomes')
+      .select('resolved')
+      .not('evaluated_at', 'is', null);
+    const evaluated = all || [];
+    const resolved = evaluated.filter(a => a.resolved).length;
+    return {
+      totalEvaluated: evaluated.length,
+      resolvedCount: resolved,
+      effectivenessRate: evaluated.length > 0 ? Math.round((resolved / evaluated.length) * 100) : 0,
+    };
+  }
+
+  // Evaluate each pending alert
+  for (const alert of pending) {
+    let metricAfter: number | null = null;
+    let resolved = false;
+
+    if (alert.related_user_id && (alert.alert_category === 'accuracy_drop' || alert.alert_category === 'stagnation')) {
+      const acc = await storageService.getRecentAccuracy(alert.related_user_id, 3);
+      if (acc !== null) {
+        metricAfter = acc;
+        // Resolved if accuracy improved by ≥ 10% from alert time, or is above 75%
+        if (alert.metric_at_alert !== null) {
+          resolved = acc >= (alert.metric_at_alert + 10) || acc >= 75;
+        } else {
+          resolved = acc >= 75;
+        }
+      }
+    } else if (alert.alert_category === 'mastery_regression' && alert.related_user_id) {
+      // Check if the user's mastery count has increased
+      const { data: states } = await supabase
+        .from('word_learning_states')
+        .select('interval_days')
+        .eq('user_id', alert.related_user_id)
+        .gte('interval_days', 7);
+      metricAfter = states?.length || 0;
+      resolved = (metricAfter || 0) > (alert.metric_at_alert || 0);
+    } else if (alert.alert_category === 'error_word_spike' && alert.related_word_id) {
+      // Check if the word's class error rate has decreased
+      const { data: states } = await supabase
+        .from('word_learning_states')
+        .select('error_count, total_attempts')
+        .eq('word_id', alert.related_word_id);
+      if (states && states.length > 0) {
+        const totalErr = states.reduce((s, r) => s + r.error_count, 0);
+        const totalAtt = states.reduce((s, r) => s + r.total_attempts, 0);
+        metricAfter = totalAtt > 0 ? Math.round((totalErr / totalAtt) * 100) : 0;
+        resolved = metricAfter < 50;
+      }
+    }
+
+    await supabase
+      .from('alert_outcomes')
+      .update({ metric_after: metricAfter, resolved, evaluated_at: now })
+      .eq('id', alert.id);
+  }
+
+  // Return updated stats
+  const { data: all } = await supabase
+    .from('alert_outcomes')
+    .select('resolved')
+    .not('evaluated_at', 'is', null);
+  const evaluated = all || [];
+  const resolvedCount = evaluated.filter(a => a.resolved).length;
+  return {
+    totalEvaluated: evaluated.length,
+    resolvedCount,
+    effectivenessRate: evaluated.length > 0 ? Math.round((resolvedCount / evaluated.length) * 100) : 0,
+  };
 }

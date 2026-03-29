@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS lexitrack.learning_plans (
   completed_sessions INT NOT NULL DEFAULT 0,
   focus_word_ids TEXT[] DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed', 'expired')),
+  previous_completion_rate NUMERIC,
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(user_id, week_start)
 );

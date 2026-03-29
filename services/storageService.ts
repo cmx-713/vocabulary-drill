@@ -1367,6 +1367,7 @@ export const storageService = {
         completed_sessions: plan.completedSessions,
         focus_word_ids: plan.focusWordIds,
         status: plan.status,
+        previous_completion_rate: plan.previousCompletionRate ?? null,
       }, { onConflict: 'user_id,week_start' })
       .select()
       .single();
@@ -1394,6 +1395,27 @@ export const storageService = {
     }
 
     await storageService.upsertPlan(updated);
+  },
+
+  updatePlanFocusWords: async (userId: string, wordIds: string[]) => {
+    const plan = await storageService.getActivePlan(userId);
+    if (!plan) return;
+    const merged = [...new Set([...plan.focusWordIds, ...wordIds])].slice(0, 10);
+    await storageService.upsertPlan({ ...plan, focusWordIds: merged });
+  },
+
+  getRecentAccuracy: async (userId: string, days: number = 3): Promise<number | null> => {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const { data } = await supabase
+      .from('practice_sessions')
+      .select('correct_count, total_count')
+      .eq('user_id', userId)
+      .gte('created_at', since.toISOString());
+    if (!data || data.length === 0) return null;
+    const total = data.reduce((s, r) => s + r.total_count, 0);
+    const correct = data.reduce((s, r) => s + r.correct_count, 0);
+    return total > 0 ? Math.round((correct / total) * 100) : null;
   },
 
   // --- Notifications ---
@@ -1474,5 +1496,6 @@ function mapDbPlanToPlan(row: any): LearningPlan {
     completedSessions: row.completed_sessions,
     focusWordIds: row.focus_word_ids || [],
     status: row.status,
+    previousCompletionRate: row.previous_completion_rate ?? undefined,
   };
 }

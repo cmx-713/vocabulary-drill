@@ -128,6 +128,20 @@ export interface LearningPlan {
   completedSessions: number;
   focusWordIds: string[];
   status: 'active' | 'completed' | 'expired';
+  previousCompletionRate?: number;
+}
+
+export interface AlertOutcome {
+  id: string;
+  alertCategory: AlertCategory;
+  alertSeverity: AlertSeverity;
+  relatedUserId?: string;
+  relatedWordId?: string;
+  metricAtAlert?: number;
+  metricAfter?: number;
+  resolved: boolean;
+  createdAt: string;
+  evaluatedAt?: string;
 }
 
 export interface AgentAlert {

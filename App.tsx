@@ -162,6 +162,7 @@ export default function App() {
   const [accuracyTrend, setAccuracyTrend] = useState<{ date: string, accuracy: number }[]>([]);
   const [agentAlerts, setAgentAlerts] = useState<AgentAlert[]>([]);
   const [alertsDismissed, setAlertsDismissed] = useState(false);
+  const [alertEval, setAlertEval] = useState<{ totalEvaluated: number; resolvedCount: number; effectivenessRate: number } | null>(null);
   const [isGeneratingDiagnosis, setIsGeneratingDiagnosis] = useState(false);
   const [classDiagnosis, setClassDiagnosis] = useState<{ weakness_analysis: string; focus_group: string; teaching_suggestion: string } | null>(null);
 
@@ -241,8 +242,9 @@ export default function App() {
       setQuizCompletionStats(qStats);
       const lbData = await storageService.getLeaderboardData(cid);
       setLeaderboardData(lbData);
-      // Agent: autonomous anomaly detection
+      // Agent: autonomous anomaly detection + self-reflection
       runAgentAnalysis(cid).then(setAgentAlerts).catch(() => setAgentAlerts([]));
+      import('./services/agentService').then(m => m.evaluateAlertOutcomes().then(setAlertEval)).catch(() => {});
     } else if (role === UserRole.STUDENT && userId) {
       const progress = await storageService.getUserProgress(userId, loginForm.studentName);
       setUserProgress(progress);
@@ -1051,6 +1053,12 @@ export default function App() {
                           </div>
                         ))}
                       </div>
+                      {alertEval && alertEval.totalEvaluated > 0 && (
+                        <div className="px-6 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center gap-2 text-xs text-gray-500">
+                          <Brain size={13} className="text-gray-400" />
+                          <span>系统自评：历史预警有效率 <b className="text-gray-700">{alertEval.effectivenessRate}%</b>（{alertEval.resolvedCount}/{alertEval.totalEvaluated} 条预警后学生有改善）</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
