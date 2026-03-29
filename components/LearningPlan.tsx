@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { LearningPlan as LearningPlanType } from '../types';
+import { LearningPlan as LearningPlanType, Word } from '../types';
 import { generatePersonalPlan } from '../services/agentService';
-import { Target, BookOpen, RotateCcw, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import { storageService } from '../services/storageService';
+import { Target, BookOpen, RotateCcw, CheckCircle2, Loader2, Sparkles, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
 
 interface LearningPlanProps {
   userId: string;
@@ -9,13 +10,24 @@ interface LearningPlanProps {
 
 const LearningPlanCard: React.FC<LearningPlanProps> = ({ userId }) => {
   const [plan, setPlan] = useState<LearningPlanType | null>(null);
+  const [focusWords, setFocusWords] = useState<Word[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     generatePersonalPlan(userId)
-      .then(p => { if (!cancelled) setPlan(p); })
+      .then(async (p) => {
+        if (cancelled) return;
+        setPlan(p);
+        if (p.focusWordIds.length > 0) {
+          const terms = await storageService.getWordTerms(p.focusWordIds);
+          const words = p.focusWordIds
+            .filter(id => terms[id])
+            .map(id => ({ id, term: terms[id] } as unknown as Word));
+          if (!cancelled) setFocusWords(words);
+        }
+      })
       .catch(() => { if (!cancelled) setPlan(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -112,6 +124,28 @@ const LearningPlanCard: React.FC<LearningPlanProps> = ({ userId }) => {
           );
         })}
       </div>
+
+      {/* Feedback loop info + Focus words */}
+      {(plan.previousCompletionRate !== undefined || focusWords.length > 0) && (
+        <div className="px-5 pb-4 space-y-2">
+          {plan.previousCompletionRate !== undefined && (
+            <div className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md ${plan.previousCompletionRate > 90 ? 'bg-emerald-50 text-emerald-700' : plan.previousCompletionRate < 40 ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-600'}`}>
+              {plan.previousCompletionRate > 90 ? <TrendingUp size={12} /> : plan.previousCompletionRate < 40 ? <TrendingDown size={12} /> : <AlertTriangle size={12} />}
+              <span>
+                上周完成率 <b>{plan.previousCompletionRate}%</b>
+                {plan.previousCompletionRate > 90 && '，本周目标已自动提升'}
+                {plan.previousCompletionRate < 40 && '，本周目标已适当降低'}
+              </span>
+            </div>
+          )}
+          {focusWords.length > 0 && (
+            <div className="text-[11px] text-gray-500 px-2.5">
+              <span className="font-medium text-gray-600">重点关注：</span>
+              {focusWords.map(w => w.term).join('、')}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

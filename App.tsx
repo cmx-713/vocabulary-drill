@@ -412,7 +412,9 @@ export default function App() {
   const handleStartDailyPractice = async () => {
     setLoadingDailyPractice(true);
     try {
-      const practiceWords = await storageService.getDailyPracticeWords(userId);
+      // Phase 5: Adaptive word count based on recent accuracy
+      const adaptiveCount = await storageService.getAdaptiveWordCount(userId);
+      const practiceWords = await storageService.getDailyPracticeWords(userId, adaptiveCount);
       if (practiceWords.length === 0) {
         alert('暂无可练习的词汇。请先在课程列表中导入词汇数据。');
         return;
@@ -514,6 +516,13 @@ export default function App() {
     const newWordCount = results.correct.filter(id => !results.wrong.includes(id)).length;
     const reviewCount = results.correct.length;
     storageService.updatePlanProgress(userId, newWordCount, reviewCount).catch(() => {});
+
+    // Phase 5: Proactive intervention — auto-inject wrong words into plan focus
+    const totalCount2 = results.correct.length + results.wrong.length + results.almost.length;
+    const sessionAccuracy = totalCount2 > 0 ? results.correct.length / totalCount2 : 1;
+    if (sessionAccuracy < 0.6 && results.wrong.length > 0) {
+      storageService.updatePlanFocusWords(userId, results.wrong).catch(() => {});
+    }
 
     // Refresh review list and stats
     await refreshData();

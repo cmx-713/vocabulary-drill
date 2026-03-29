@@ -582,9 +582,21 @@ export const storageService = {
   },
 
   // Smart Daily Practice: auto-select the best words for today
+  // Priority: (0) Learning plan focus words → (1) Ebbinghaus due → (2) High-error → (3) New words
   getDailyPracticeWords: async (userId: string, targetCount: number = 15): Promise<Word[]> => {
     const today = new Date().toISOString().split('T')[0];
     const collectedWordIds: string[] = [];
+
+    // --- Priority 0: Agent-driven focus words from learning plan ---
+    const activePlan = await storageService.getActivePlan(userId);
+    if (activePlan && activePlan.focusWordIds.length > 0) {
+      for (const wid of activePlan.focusWordIds) {
+        if (collectedWordIds.length >= Math.min(5, targetCount)) break;
+        if (!collectedWordIds.includes(wid)) {
+          collectedWordIds.push(wid);
+        }
+      }
+    }
 
     // --- Priority 1: Ebbinghaus due review words ---
     const { data: dueStates } = await supabase
@@ -1395,6 +1407,14 @@ export const storageService = {
     }
 
     await storageService.upsertPlan(updated);
+  },
+
+  getAdaptiveWordCount: async (userId: string): Promise<number> => {
+    const acc = await storageService.getRecentAccuracy(userId, 3);
+    if (acc === null) return 15;
+    if (acc > 90) return 20;
+    if (acc < 70) return 10;
+    return 15;
   },
 
   updatePlanFocusWords: async (userId: string, wordIds: string[]) => {
