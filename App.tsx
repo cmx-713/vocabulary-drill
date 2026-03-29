@@ -480,9 +480,9 @@ export default function App() {
     }
   };
 
-  const handleGameComplete = async (results: { correct: string[], wrong: string[] }) => {
+  const handleGameComplete = async (results: { correct: string[], wrong: string[], almost: string[] }) => {
     console.log("Game Complete:", results);
-    const isPerfect = results.wrong.length === 0 && results.correct.length > 0;
+    const isPerfect = results.wrong.length === 0 && results.almost.length === 0 && results.correct.length > 0;
 
     // Update Progress via Service
     const { progress, newAchievements } = await storageService.updateProgress(
@@ -492,10 +492,10 @@ export default function App() {
     );
     setUserProgress(progress);
 
-    // Save practice session for pre/post comparison (only for unit-based practice)
-    if (selectedUnit && selectedUnit !== 'DAILY_PRACTICE' && selectedUnit !== 'REVIEW_MODE') {
+    // Save practice session record (all modes) for accuracy tracking
+    if (selectedUnit) {
       const correctCount = results.correct.length;
-      const totalCount = results.correct.length + results.wrong.length;
+      const totalCount = results.correct.length + results.wrong.length + results.almost.length;
       await storageService.savePracticeSession(userId, selectedUnit, correctCount, totalCount);
     }
 

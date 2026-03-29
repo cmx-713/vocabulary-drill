@@ -6,7 +6,7 @@ import { storageService } from '../services/storageService';
 interface DictationGameProps {
   words: Word[];
   userId: string;
-  onComplete: (results: { correct: string[], wrong: string[] }) => void;
+  onComplete: (results: { correct: string[], wrong: string[], almost: string[] }) => void;
   onExit: () => void;
 }
 

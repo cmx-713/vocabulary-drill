@@ -351,20 +351,20 @@ export const storageService = {
       lastPracticeDate: p.last_practice_date || '无记录'
     }));
 
-    // Average Accuracy
-    const totalPlayed = progress.reduce((sum, p) => sum + p.total_games_played, 0);
-    const totalPerfect = progress.reduce((sum, p) => sum + p.perfect_scores, 0);
-    const classAccuracy = totalPlayed > 0 ? Math.round((totalPerfect / totalPlayed) * 100) : 0;
-
     // 2. Fetch word learning states (filtered by class user IDs if needed)
-    let statesQuery = supabase.from('word_learning_states').select('word_id, user_id, interval_days, error_count, total_attempts');
+    let statesQuery = supabase.from('word_learning_states').select('word_id, user_id, interval_days, consecutive_correct, error_count, total_attempts');
     if (classId && classUserIds.length > 0) statesQuery = statesQuery.in('user_id', classUserIds);
     else if (classId && classUserIds.length === 0) return { classMastery: 0, classAccuracy: 0, topErrorWords: [], inactiveStudents, streakLeaderboard, allStudents: [], totalStudents: progress.length, progressLeaderboard: [] };
     const { data: allStates } = await statesQuery;
     const states = allStates || [];
 
-    // Class Mastery
-    const masteredCount = states.filter(s => s.error_count === 0 && s.total_attempts >= 2).length;
+    // Average Accuracy: correct answers / total attempts (word-level)
+    const totalAttempts = states.reduce((sum, s) => sum + (s.total_attempts || 0), 0);
+    const totalErrors = states.reduce((sum, s) => sum + (s.error_count || 0), 0);
+    const classAccuracy = totalAttempts > 0 ? Math.round(((totalAttempts - totalErrors) / totalAttempts) * 100) : 0;
+
+    // Class Mastery: words with Ebbinghaus interval >= 7 days (reviewed correctly through 4+ cycles)
+    const masteredCount = states.filter(s => s.interval_days >= 7).length;
     const classMastery = states.length > 0 ? Math.round((masteredCount / states.length) * 100) : 0;
 
     // Top Error Words
@@ -506,14 +506,14 @@ export const storageService = {
       .map(p => ({ userId: p.user_id, realName: p.real_name || '未知姓名', perfectScores: p.perfect_scores }));
 
     // 2. Vocabulary Mastery (filtered by class user IDs)
-    let statesQuery = supabase.from('word_learning_states').select('user_id, error_count, total_attempts');
+    let statesQuery = supabase.from('word_learning_states').select('user_id, interval_days, error_count, total_attempts');
     if (classId && classUserIds.length > 0) statesQuery = statesQuery.in('user_id', classUserIds);
     else if (classId && classUserIds.length === 0) return { practiceChampions, perfectScoreChampions, vocabularyMasters: [] };
     const { data: allStates } = await statesQuery;
 
     const masteryMap = new Map<string, number>();
     (allStates || []).forEach(s => {
-      if (s.error_count === 0 && s.total_attempts >= 2) {
+      if (s.interval_days >= 7) {
         masteryMap.set(s.user_id, (masteryMap.get(s.user_id) || 0) + 1);
       }
     });
@@ -529,7 +529,7 @@ export const storageService = {
     return { practiceChampions, perfectScoreChampions, vocabularyMasters };
   },
 
-  // Get class accuracy trend from real DB data (last 7 days)
+  // Get class accuracy trend from practice session records (last 7 days)
   getClassAccuracyTrend: async (classId?: string | null) => {
     const dates: string[] = [];
     for (let i = 6; i >= 0; i--) {
@@ -538,43 +538,44 @@ export const storageService = {
       dates.push(d.toISOString().split('T')[0]);
     }
 
-    // Get class user IDs if filtering by class
+    const emptyTrend = dates.map(d => ({ date: new Date(d).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }), accuracy: 0 }));
+
+    // Get class user IDs
     let userFilter: string[] | null = null;
     if (classId) {
       const { data: classStudents } = await supabase.from('user_progress').select('user_id').eq('class_id', classId);
       userFilter = (classStudents || []).map(s => s.user_id);
-      if (userFilter.length === 0) return dates.map(d => ({ date: new Date(d).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }), accuracy: 0 }));
     } else {
       const { data: classStudents } = await supabase.from('user_progress').select('user_id').not('class_id', 'is', 'null');
       userFilter = (classStudents || []).map(s => s.user_id);
-      if (userFilter.length === 0) return dates.map(d => ({ date: new Date(d).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }), accuracy: 0 }));
     }
+    if (!userFilter || userFilter.length === 0) return emptyTrend;
 
-    // Fetch word_learning_states reviewed in past 7 days
-    let statesQuery = supabase.from('word_learning_states')
-      .select('user_id, last_reviewed, error_count, total_attempts')
-      .gte('last_reviewed', dates[0]);
-    if (userFilter) statesQuery = statesQuery.in('user_id', userFilter);
-    const { data: states } = await statesQuery;
+    // Fetch per-session records (each row = one completed practice game)
+    let sessionsQuery = supabase.from('practice_sessions')
+      .select('correct_count, total_count, created_at')
+      .gte('created_at', dates[0])
+      .in('user_id', userFilter);
+    const { data: sessions } = await sessionsQuery;
 
-    // Group by date
-    const dayMap = new Map<string, { totalAttempts: number; totalErrors: number }>();
-    dates.forEach(d => dayMap.set(d, { totalAttempts: 0, totalErrors: 0 }));
+    // Group by date, aggregate correct / total
+    const dayMap = new Map<string, { correct: number; total: number }>();
+    dates.forEach(d => dayMap.set(d, { correct: 0, total: 0 }));
 
-    (states || []).forEach(s => {
-      const dateStr = s.last_reviewed;
+    (sessions || []).forEach(s => {
+      const dateStr = s.created_at.substring(0, 10);
       if (dayMap.has(dateStr)) {
         const entry = dayMap.get(dateStr)!;
-        entry.totalAttempts += (s.total_attempts || 0);
-        entry.totalErrors += (s.error_count || 0);
+        entry.correct += s.correct_count;
+        entry.total += s.total_count;
       }
     });
 
     return dates.map(d => {
       const entry = dayMap.get(d)!;
       const displayDate = new Date(d).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-      const accuracy = entry.totalAttempts > 0
-        ? Math.round(((entry.totalAttempts - entry.totalErrors) / entry.totalAttempts) * 100)
+      const accuracy = entry.total > 0
+        ? Math.round((entry.correct / entry.total) * 100)
         : 0;
       return { date: displayDate, accuracy };
     });
@@ -1079,7 +1080,7 @@ export const storageService = {
 
     const allStates = states || [];
     const totalWordsStudied = allStates.length;
-    const masteredStates = allStates.filter(s => s.error_count === 0 && s.total_attempts >= 2);
+    const masteredStates = allStates.filter(s => s.interval_days >= 7);
     const masteredWordCount = masteredStates.length;
     const totalAttempts = allStates.reduce((sum, s) => sum + (s.total_attempts || 0), 0);
     const totalErrors = allStates.reduce((sum, s) => sum + (s.error_count || 0), 0);
