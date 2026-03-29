@@ -33,20 +33,28 @@ const getAiConfig = () => {
 };
 
 const extractJson = (text: string) => {
-  try {
-    // First, try to just find the JSON array in the text directly
-    // This is a more robust regex that looks for the first [ and the last ]
-    const arrayMatch = text.match(/\[[\s\S]*\]/);
-    if (arrayMatch) {
-      return JSON.parse(arrayMatch[0]);
-    }
+  // Strip markdown code fences if present
+  const cleaned = text.replace(/```(?:json)?\s*/g, '').replace(/```\s*/g, '').trim();
 
-    // If that fails, try parsing the whole thing (maybe it's a solid JSON response without markdown)
-    return JSON.parse(text);
-  } catch (error) {
-    console.error("Failed to extract JSON from AI response:", text);
-    throw new Error("模型返回的内容不是有效的 JSON 数组：" + (error as Error).message);
+  // Try direct parse first
+  try { return JSON.parse(cleaned); } catch { /* fall through */ }
+
+  // Try to find the outermost JSON structure (array or object)
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+  const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+
+  // If both match, use whichever starts first in the text (outermost structure)
+  const candidates: { idx: number; str: string }[] = [];
+  if (arrayMatch) candidates.push({ idx: arrayMatch.index!, str: arrayMatch[0] });
+  if (objectMatch) candidates.push({ idx: objectMatch.index!, str: objectMatch[0] });
+  candidates.sort((a, b) => a.idx - b.idx);
+
+  for (const c of candidates) {
+    try { return JSON.parse(c.str); } catch { /* try next */ }
   }
+
+  console.error("Failed to extract JSON from AI response:", text);
+  throw new Error("模型返回的内容不是有效的 JSON");
 };
 
 const callChatCompletion = async (systemPrompt: string, userPrompt: string) => {
