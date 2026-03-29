@@ -1,4 +1,4 @@
-import { AgentAlert, AlertCategory, AlertSeverity } from '../types';
+import { AgentAlert, AlertCategory, AlertSeverity, Word } from '../types';
 import { storageService } from './storageService';
 
 let alertIdCounter = 0;
@@ -224,4 +224,251 @@ function detectMasteryRegression(
   });
 
   return alerts;
+}
+
+// ═══════════════════════════════════════════════════════
+// Phase 2: Structured Pattern Recognition for LLM Diagnosis
+// ═══════════════════════════════════════════════════════
+
+export interface ErrorWordCluster {
+  pattern: string;
+  words: string[];
+  description: string;
+}
+
+export interface StudentTrajectory {
+  userId: string;
+  name: string;
+  type: 'improving' | 'stable' | 'declining' | 'cramming' | 'inactive';
+  label: string;
+  detail: string;
+}
+
+export interface StructuredDiagnosisContext {
+  errorClusters: ErrorWordCluster[];
+  trajectories: StudentTrajectory[];
+  behaviorInsights: string[];
+}
+
+// ─── Build structured context for LLM diagnosis ───
+
+export async function buildDiagnosisContext(classId: string | null): Promise<StructuredDiagnosisContext> {
+  const [sessions, states, nameMap] = await Promise.all([
+    storageService.getRecentSessionsByClass(classId, 6),
+    storageService.getClassLearningStates(classId),
+    storageService.getStudentNames(classId),
+  ]);
+
+  const allWords = await storageService.getWords();
+  const wordMap = new Map<string, Word>();
+  allWords.forEach(w => wordMap.set(w.id, w));
+
+  const errorClusters = clusterErrorWords(states, wordMap);
+  const trajectories = classifyTrajectories(sessions, states, nameMap);
+  const behaviorInsights = analyzeBehavior(sessions, nameMap);
+
+  return { errorClusters, trajectories, behaviorInsights };
+}
+
+// ─── Error Word Clustering ───
+
+function clusterErrorWords(
+  states: { user_id: string; word_id: string; error_count: number; total_attempts: number }[],
+  wordMap: Map<string, Word>,
+): ErrorWordCluster[] {
+  const wordErrors = new Map<string, { errors: number; attempts: number; students: number }>();
+  states.forEach(s => {
+    if (s.error_count === 0) return;
+    const existing = wordErrors.get(s.word_id) || { errors: 0, attempts: 0, students: 0 };
+    existing.errors += s.error_count;
+    existing.attempts += s.total_attempts;
+    existing.students += 1;
+    wordErrors.set(s.word_id, existing);
+  });
+
+  const topErrors = Array.from(wordErrors.entries())
+    .filter(([, v]) => v.students >= 2)
+    .sort((a, b) => b[1].errors - a[1].errors)
+    .slice(0, 20);
+
+  const errorWordObjs = topErrors
+    .map(([id]) => wordMap.get(id))
+    .filter((w): w is Word => !!w);
+
+  const clusters: ErrorWordCluster[] = [];
+
+  // Cluster 1: Morphologically similar words (edit distance <= 3)
+  const confusionPairs: [Word, Word][] = [];
+  for (let i = 0; i < errorWordObjs.length; i++) {
+    for (let j = i + 1; j < errorWordObjs.length; j++) {
+      const a = errorWordObjs[i].term.toLowerCase();
+      const b = errorWordObjs[j].term.toLowerCase();
+      if (editDistance(a, b) <= 3 && a !== b) {
+        confusionPairs.push([errorWordObjs[i], errorWordObjs[j]]);
+      }
+    }
+  }
+  if (confusionPairs.length > 0) {
+    clusters.push({
+      pattern: '形近词混淆',
+      words: confusionPairs.flatMap(([a, b]) => [a.term, b.term]).filter((v, i, arr) => arr.indexOf(v) === i),
+      description: `以下单词拼写相近，学生容易混淆：${confusionPairs.map(([a, b]) => `${a.term}/${b.term}`).join('、')}`,
+    });
+  }
+
+  // Cluster 2: Same-unit error concentration
+  const unitErrorMap = new Map<string, string[]>();
+  errorWordObjs.forEach(w => {
+    if (!unitErrorMap.has(w.unit)) unitErrorMap.set(w.unit, []);
+    unitErrorMap.get(w.unit)!.push(w.term);
+  });
+  unitErrorMap.forEach((terms, unit) => {
+    if (terms.length >= 3) {
+      clusters.push({
+        pattern: '单元集中出错',
+        words: terms,
+        description: `${unit} 单元有 ${terms.length} 个高频错词（${terms.join('、')}），该单元可能需要整体复习`,
+      });
+    }
+  });
+
+  // Cluster 3: Long words (length >= 8) concentration
+  const longWords = errorWordObjs.filter(w => w.term.length >= 8);
+  if (longWords.length >= 3) {
+    clusters.push({
+      pattern: '长词拼写困难',
+      words: longWords.map(w => w.term),
+      description: `有 ${longWords.length} 个 8 字母以上的长词出错率较高（${longWords.map(w => w.term).join('、')}），建议通过词根词缀拆解教学`,
+    });
+  }
+
+  return clusters;
+}
+
+// ─── Student Trajectory Classification ───
+
+function classifyTrajectories(
+  sessions: { user_id: string; correct_count: number; total_count: number; created_at: string }[],
+  states: { user_id: string; interval_days: number }[],
+  nameMap: Record<string, string>,
+): StudentTrajectory[] {
+  const now = Date.now();
+  const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+  const trajectories: StudentTrajectory[] = [];
+
+  const userStats = new Map<string, {
+    recentCorrect: number; recentTotal: number; recentCount: number;
+    prevCorrect: number; prevTotal: number; prevCount: number;
+  }>();
+
+  sessions.forEach(s => {
+    const t = new Date(s.created_at).getTime();
+    const isRecent = (now - t) <= threeDaysMs;
+    if (!userStats.has(s.user_id)) {
+      userStats.set(s.user_id, { recentCorrect: 0, recentTotal: 0, recentCount: 0, prevCorrect: 0, prevTotal: 0, prevCount: 0 });
+    }
+    const u = userStats.get(s.user_id)!;
+    if (isRecent) { u.recentCorrect += s.correct_count; u.recentTotal += s.total_count; u.recentCount++; }
+    else { u.prevCorrect += s.correct_count; u.prevTotal += s.total_count; u.prevCount++; }
+  });
+
+  const masteryMap = new Map<string, number>();
+  states.forEach(s => {
+    if (s.interval_days >= 7) masteryMap.set(s.user_id, (masteryMap.get(s.user_id) || 0) + 1);
+  });
+
+  Object.keys(nameMap).forEach(userId => {
+    const name = nameMap[userId];
+    const u = userStats.get(userId);
+
+    if (!u || (u.recentCount === 0 && u.prevCount === 0)) {
+      trajectories.push({ userId, name, type: 'inactive', label: '未活跃', detail: '近 6 天无练习记录' });
+      return;
+    }
+
+    const recentAcc = u.recentTotal > 0 ? u.recentCorrect / u.recentTotal : 0;
+    const prevAcc = u.prevTotal > 0 ? u.prevCorrect / u.prevTotal : 0;
+    const totalSessions = u.recentCount + u.prevCount;
+    const mastered = masteryMap.get(userId) || 0;
+
+    if (u.prevTotal >= 5 && u.recentTotal >= 5) {
+      const diff = recentAcc - prevAcc;
+      if (diff >= 0.1) {
+        trajectories.push({ userId, name, type: 'improving', label: '进步型', detail: `正确率提升 ${Math.round(diff * 100)}%，已掌握 ${mastered} 词` });
+      } else if (diff <= -0.1) {
+        trajectories.push({ userId, name, type: 'declining', label: '退步型', detail: `正确率下降 ${Math.round(Math.abs(diff) * 100)}%，需要关注` });
+      } else {
+        trajectories.push({ userId, name, type: 'stable', label: '稳定型', detail: `正确率稳定在 ${Math.round(recentAcc * 100)}%，已掌握 ${mastered} 词` });
+      }
+    } else if (totalSessions >= 5 && u.recentCount >= 4 && u.prevCount <= 1) {
+      trajectories.push({ userId, name, type: 'cramming', label: '突击型', detail: `近 3 天集中练习 ${u.recentCount} 次，此前几乎无练习` });
+    } else {
+      const acc = u.recentTotal > 0 ? Math.round(recentAcc * 100) : 0;
+      trajectories.push({ userId, name, type: 'stable', label: '数据不足', detail: `练习次数较少(${totalSessions}次)，正确率 ${acc}%` });
+    }
+  });
+
+  return trajectories;
+}
+
+// ─── Behavior Insights ───
+
+function analyzeBehavior(
+  sessions: { user_id: string; correct_count: number; total_count: number; created_at: string }[],
+  nameMap: Record<string, string>,
+): string[] {
+  const insights: string[] = [];
+  const studentCount = Object.keys(nameMap).length;
+  if (studentCount === 0) return insights;
+
+  const activeUsers = new Set(sessions.map(s => s.user_id));
+  const activeRate = Math.round((activeUsers.size / studentCount) * 100);
+  if (activeRate < 50) {
+    insights.push(`近 6 天仅有 ${activeRate}% 的学生参与了练习，整体参与度偏低`);
+  } else if (activeRate >= 80) {
+    insights.push(`近 6 天有 ${activeRate}% 的学生参与了练习，整体参与度良好`);
+  }
+
+  const weekdaySessions: number[] = [];
+  const weekendSessions: number[] = [];
+  sessions.forEach(s => {
+    const day = new Date(s.created_at).getDay();
+    if (day === 0 || day === 6) weekendSessions.push(1);
+    else weekdaySessions.push(1);
+  });
+  if (weekdaySessions.length > 0 && weekendSessions.length === 0) {
+    insights.push('学生练习集中在工作日，周末几乎无人练习，可考虑布置周末任务');
+  }
+
+  const sessionCounts = new Map<string, number>();
+  sessions.forEach(s => sessionCounts.set(s.user_id, (sessionCounts.get(s.user_id) || 0) + 1));
+  const avgSessions = activeUsers.size > 0
+    ? Math.round(Array.from(sessionCounts.values()).reduce((a, b) => a + b, 0) / activeUsers.size * 10) / 10
+    : 0;
+  if (avgSessions >= 3) {
+    insights.push(`活跃学生人均练习 ${avgSessions} 次/6天，练习频率较高`);
+  } else if (avgSessions > 0) {
+    insights.push(`活跃学生人均练习仅 ${avgSessions} 次/6天，建议鼓励增加练习频率`);
+  }
+
+  return insights;
+}
+
+// ─── Utility: Edit Distance ───
+
+function editDistance(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+  return dp[m][n];
 }

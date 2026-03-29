@@ -475,8 +475,11 @@ export default function App() {
     if (!teacherMetrics) return;
     setIsGeneratingDiagnosis(true);
     try {
+      // Phase 2: Agent does structured analysis first, then LLM interprets
+      const { buildDiagnosisContext } = await import('./services/agentService');
+      const diagCtx = await buildDiagnosisContext(selectedClassId);
       const { generateClassDiagnosis } = await import('./services/geminiService');
-      const report = await generateClassDiagnosis(teacherMetrics);
+      const report = await generateClassDiagnosis(teacherMetrics, diagCtx);
       setClassDiagnosis(report);
     } catch (err: any) {
       alert(err.message || '生成诊断报告失败，请检查配置。');

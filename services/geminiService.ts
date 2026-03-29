@@ -1,4 +1,5 @@
 import { Word, QuizQuestion, TeacherMetrics } from '../types';
+import type { StructuredDiagnosisContext } from './agentService';
 
 interface GeneratedContent {
   definition?: string;
@@ -250,8 +251,12 @@ export const generateWeaknessBreakthrough = async (wrongWords: Word[]): Promise<
 
 /**
  * 教师端：通过本地配置的大模型生成班级学情诊断与教学建议
+ * 升级版：接收 agentService 预处理的结构化分析上下文，让 LLM 做深度诊断而非表面描述
  */
-export const generateClassDiagnosis = async (metrics: TeacherMetrics): Promise<{
+export const generateClassDiagnosis = async (
+  metrics: TeacherMetrics,
+  diagnosisContext?: StructuredDiagnosisContext,
+): Promise<{
   weakness_analysis: string;
   focus_group: string;
   teaching_suggestion: string;
@@ -261,24 +266,60 @@ export const generateClassDiagnosis = async (metrics: TeacherMetrics): Promise<{
     const inactiveContext = metrics.inactiveStudents.slice(0, 5).map(s => `${s.realName} (最后练习: ${s.lastPracticeDate})`).join(', ');
     const progressContext = metrics.progressLeaderboard?.slice(0, 3).map(p => `${p.realName} (提升 ${p.improvement}%)`).join(', ') || '暂无';
 
-    const systemPrompt = `You are an expert English teaching assistant diagnosing class performance data.
-Your goal is to provide highly actionable, warm, and data-driven insights for the teacher.
-You must output ONLY a valid JSON object matching this exact schema:
+    // Build structured analysis section from agent's pattern recognition
+    let structuredSection = '';
+    if (diagnosisContext) {
+      const { errorClusters, trajectories, behaviorInsights } = diagnosisContext;
+
+      if (errorClusters.length > 0) {
+        structuredSection += `\n      [Agent Pattern Recognition - Error Clusters]\n`;
+        errorClusters.forEach(c => { structuredSection += `      - ${c.pattern}: ${c.description}\n`; });
+      }
+
+      const declining = trajectories.filter(t => t.type === 'declining');
+      const improving = trajectories.filter(t => t.type === 'improving');
+      const cramming = trajectories.filter(t => t.type === 'cramming');
+      const inactive = trajectories.filter(t => t.type === 'inactive');
+      if (declining.length + improving.length + cramming.length > 0) {
+        structuredSection += `\n      [Agent Pattern Recognition - Student Trajectories]\n`;
+        if (declining.length > 0) structuredSection += `      - 退步型(${declining.length}人): ${declining.map(t => `${t.name}(${t.detail})`).join('; ')}\n`;
+        if (improving.length > 0) structuredSection += `      - 进步型(${improving.length}人): ${improving.map(t => `${t.name}(${t.detail})`).join('; ')}\n`;
+        if (cramming.length > 0) structuredSection += `      - 突击型(${cramming.length}人): ${cramming.map(t => `${t.name}(${t.detail})`).join('; ')}\n`;
+        if (inactive.length > 0) structuredSection += `      - 未活跃(${inactive.length}人): ${inactive.slice(0, 5).map(t => t.name).join('、')}${inactive.length > 5 ? '等' : ''}\n`;
+      }
+
+      if (behaviorInsights.length > 0) {
+        structuredSection += `\n      [Agent Pattern Recognition - Behavior Insights]\n`;
+        behaviorInsights.forEach(i => { structuredSection += `      - ${i}\n`; });
+      }
+    }
+
+    const systemPrompt = `You are an expert English teaching assistant performing a deep diagnosis of class learning data.
+An AI agent has already done structured pattern recognition on the raw data. You must leverage these patterns to provide specific, actionable, and personalized insights — NOT generic advice.
+
+Rules:
+- Mention students BY NAME when discussing focus groups
+- Reference specific error word clusters and explain WHY students might confuse them (e.g., similar prefix, shared Latin root)
+- Suggest ONE concrete classroom activity with a step-by-step outline
+- Use Chinese for all values
+
+Output ONLY a valid JSON object:
 {
-  "weakness_analysis": "string - 词汇短板归因分析(分析错词规律,2-3句话)",
-  "focus_group": "string - 重点关注群体建议(指名道姓地提醒老师近期懒惰的同学或表扬进步极大的同学,2-3句话)",
-  "teaching_suggestion": "string - 下一步具体教学建议(结合错词给出一个具体的Warm-up活动建议,2-3句话)"
-}
-Output nothing else but the raw JSON.`;
+  "weakness_analysis": "string - 基于错词聚类的深度归因分析(引用具体的形近词/单元集中出错/长词等模式,3-4句话)",
+  "focus_group": "string - 指名道姓的学生关注建议(区分退步型/突击型/未活跃型给出不同策略,3-4句话)",
+  "teaching_suggestion": "string - 一个具体的课堂活动方案(包含活动名称、步骤和预期效果,3-4句话)"
+}`;
 
     const userPrompt = `
       Class Performance Data:
       - Overall Accuracy: ${metrics.classAccuracy}%
+      - Mastery Rate: ${metrics.classMastery}%
+      - Total Students: ${metrics.totalStudents}
       - Top Error Words: ${errorWordsContext || 'None'}
       - Inactive Students (>7 days): ${inactiveContext || 'None'}
       - Top Progress Students: ${progressContext}
-
-      Please analyze this data and return the required JSON. Use Chinese language for the values.
+      ${structuredSection}
+      Please analyze ALL the above data (especially the Agent Pattern Recognition sections) and return the required JSON.
     `;
 
     const responseText = await callChatCompletion(systemPrompt, userPrompt);
