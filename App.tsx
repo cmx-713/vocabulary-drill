@@ -95,6 +95,16 @@ const CET_SETS = {
   CET6: ['CET-6 Set 1', 'CET-6 Set 2', 'CET-6 Set 3', 'CET-6 Set 4', 'CET-6 Hard'],
 };
 
+function renderSimpleMarkdown(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n(\d+)\.\s/g, '<br/><span class="inline-block w-5 text-right mr-1 font-medium text-gray-500">$1.</span> ')
+    .replace(/\n[-•]\s/g, '<br/>• ')
+    .replace(/\n{2,}/g, '<br/><br/>')
+    .replace(/\n/g, '<br/>');
+}
+
 export default function App() {
   // Restore session from localStorage
   const savedSession = localStorage.getItem('LEXITRACK_SESSION');
@@ -164,7 +174,7 @@ export default function App() {
   const [alertsDismissed, setAlertsDismissed] = useState(false);
   const [alertEval, setAlertEval] = useState<{ totalEvaluated: number; resolvedCount: number; effectivenessRate: number } | null>(null);
   const [isGeneratingDiagnosis, setIsGeneratingDiagnosis] = useState(false);
-  const [classDiagnosis, setClassDiagnosis] = useState<{ weakness_analysis: string; focus_group: string; teaching_suggestion: string } | null>(null);
+  const [classDiagnosis, setClassDiagnosis] = useState<{ weakness_analysis: string; focus_group: string; unit_difficulty: string; action_items: string; teaching_suggestion: string } | null>(null);
 
   // AI Quiz Generation States
   const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
@@ -353,7 +363,21 @@ export default function App() {
     setIsGeneratingQuiz(true);
     try {
       const { generateClozeTest } = await import('./services/geminiService');
-      const wordsToTest = teacherMetrics.topErrorWords.map(w => w.word).slice(0, 5); // top 5 words
+      // Follow the teacher's textbook/unit filter selection
+      const filtered = teacherMetrics.topErrorWords.filter(({ word }) => {
+        if (errorWordBook === 'ALL') return true;
+        if (errorWordUnit !== 'ALL') return word.unit === errorWordUnit;
+        if (errorWordBook.startsWith('NHRW')) return word.unit.startsWith(errorWordBook + '-');
+        if (errorWordBook === 'CET4') return word.unit.startsWith('CET-4');
+        if (errorWordBook === 'CET6') return word.unit.startsWith('CET-6');
+        return true;
+      });
+      const wordsToTest = filtered.map(w => w.word).slice(0, 15);
+      if (wordsToTest.length === 0) {
+        alert("当前筛选条件下没有易错词，请调整教材/单元筛选。");
+        setIsGeneratingQuiz(false);
+        return;
+      }
       const quiz = await generateClozeTest(wordsToTest);
       setGeneratedQuiz(quiz);
       setQuizModalOpen(true);
@@ -1160,42 +1184,33 @@ export default function App() {
 
                     {classDiagnosis && (
                       <div className="p-6 bg-indigo-50/30">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                          {/* Weakness Analysis */}
-                          <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-1 h-full bg-red-400"></div>
-                            <div className="flex items-center gap-2 text-red-600 mb-3">
-                              <AlertTriangle size={20} />
-                              <h4 className="font-bold text-lg font-serif">词汇短板归因</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          {[
+                            { key: 'weakness_analysis' as const, title: '词汇短板归因', icon: <AlertTriangle size={20} />, color: 'red', borderColor: 'bg-red-400', textColor: 'text-red-600' },
+                            { key: 'focus_group' as const, title: '重点关注学生', icon: <Users size={20} />, color: 'amber', borderColor: 'bg-amber-400', textColor: 'text-amber-600' },
+                            { key: 'unit_difficulty' as const, title: '单元难度排名', icon: <BarChart2 size={20} />, color: 'blue', borderColor: 'bg-blue-400', textColor: 'text-blue-600' },
+                            { key: 'action_items' as const, title: '本周行动项', icon: <CheckCircle2 size={20} />, color: 'purple', borderColor: 'bg-purple-400', textColor: 'text-purple-600' },
+                          ].map(({ key, title, icon, borderColor, textColor }) => (
+                            <div key={key} className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm relative overflow-hidden">
+                              <div className={`absolute top-0 left-0 w-1 h-full ${borderColor}`}></div>
+                              <div className={`flex items-center gap-2 ${textColor} mb-3`}>
+                                {icon}
+                                <h4 className="font-bold text-lg font-serif">{title}</h4>
+                              </div>
+                              <div className="text-gray-700 leading-relaxed text-sm prose prose-sm max-w-none"
+                                dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(classDiagnosis[key]) }} />
                             </div>
-                            <p className="text-gray-700 leading-relaxed text-sm">
-                              {classDiagnosis.weakness_analysis}
-                            </p>
+                          ))}
+                        </div>
+                        {/* Teaching Suggestion - full width */}
+                        <div className="mt-5 bg-white p-5 rounded-xl border border-indigo-100 shadow-sm relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-1 h-full bg-emerald-400"></div>
+                          <div className="flex items-center gap-2 text-emerald-600 mb-3">
+                            <Lightbulb size={20} />
+                            <h4 className="font-bold text-lg font-serif">课堂活动方案</h4>
                           </div>
-
-                          {/* Focus Group */}
-                          <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
-                            <div className="flex items-center gap-2 text-amber-600 mb-3">
-                              <Users size={20} />
-                              <h4 className="font-bold text-lg font-serif">重点关注群体</h4>
-                            </div>
-                            <p className="text-gray-700 leading-relaxed text-sm">
-                              {classDiagnosis.focus_group}
-                            </p>
-                          </div>
-
-                          {/* Teaching Suggestion */}
-                          <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-1 h-full bg-emerald-400"></div>
-                            <div className="flex items-center gap-2 text-emerald-600 mb-3">
-                              <Lightbulb size={20} />
-                              <h4 className="font-bold text-lg font-serif">下一步教学建议</h4>
-                            </div>
-                            <p className="text-gray-700 leading-relaxed text-sm">
-                              {classDiagnosis.teaching_suggestion}
-                            </p>
-                          </div>
+                          <div className="text-gray-700 leading-relaxed text-sm prose prose-sm max-w-none"
+                            dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(classDiagnosis.teaching_suggestion) }} />
                         </div>
                       </div>
                     )}

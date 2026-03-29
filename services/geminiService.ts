@@ -147,7 +147,8 @@ export const generateClozeTest = async (words: Word[]): Promise<QuizQuestion[]> 
     const systemPrompt = "You are an expert English teacher generating quiz content. Respond ONLY with a valid JSON array.";
 
     const userPrompt = `
-      Task: Create a multiple-choice cloze test (fill in the blank) for the following English words.
+      Task: Create a multiple-choice cloze test (fill in the blank) for the following ${words.length} English words.
+      You MUST generate exactly ${words.length} questions — one question per word, no more, no less.
       Target Words: ${JSON.stringify(words.map(w => ({ term: w.term, definition: w.definition })))}
 
       Requirements for EACH word:
@@ -156,13 +157,12 @@ export const generateClozeTest = async (words: Word[]): Promise<QuizQuestion[]> 
       3. Provide the full Chinese translation of the sentence.
       4. Provide 4 option strings where one is the correct term and the other three are DISTRACTORS.
 
-      ⚠️ CRITICAL RULES for distractors:
-      - Distractors must NOT be synonyms or near-synonyms of the correct answer. For example, if the answer is "vital", do NOT use "crucial", "essential", or "critical" as distractors.
+      CRITICAL RULES for distractors:
+      - Distractors must NOT be synonyms or near-synonyms of the correct answer.
       - Distractors must NOT be words that could also correctly fit in the blank.
-      - Distractors should be real English words of the same part of speech (noun for noun, verb for verb, etc.) and similar difficulty level, but with CLEARLY DIFFERENT meanings.
-      - Good distractors are words that look plausible at first glance but are obviously wrong when you understand the sentence context.
+      - Distractors should be real English words of the same part of speech and similar difficulty level, but with CLEARLY DIFFERENT meanings.
 
-      Return ONLY a JSON Array containing objects with these exact keys:
+      Return ONLY a JSON Array of exactly ${words.length} objects with these exact keys:
       [
         {
           "term": "The correct target word",
@@ -261,20 +261,23 @@ export const generateWeaknessBreakthrough = async (wrongWords: Word[]): Promise<
  * 教师端：通过本地配置的大模型生成班级学情诊断与教学建议
  * 升级版：接收 agentService 预处理的结构化分析上下文，让 LLM 做深度诊断而非表面描述
  */
+export interface ClassDiagnosisResult {
+  weakness_analysis: string;
+  focus_group: string;
+  unit_difficulty: string;
+  action_items: string;
+  teaching_suggestion: string;
+}
+
 export const generateClassDiagnosis = async (
   metrics: TeacherMetrics,
   diagnosisContext?: StructuredDiagnosisContext,
-): Promise<{
-  weakness_analysis: string;
-  focus_group: string;
-  teaching_suggestion: string;
-}> => {
+): Promise<ClassDiagnosisResult> => {
   try {
-    const errorWordsContext = metrics.topErrorWords.slice(0, 5).map(w => `${w.word.term} (错误 ${w.errorCount} 次)`).join(', ');
+    const errorWordsContext = metrics.topErrorWords.slice(0, 10).map(w => `${w.word.term}(${w.word.unit}, 错误${w.errorCount}次/${w.totalAttempts}次尝试)`).join(', ');
     const inactiveContext = metrics.inactiveStudents.slice(0, 5).map(s => `${s.realName} (最后练习: ${s.lastPracticeDate})`).join(', ');
     const progressContext = metrics.progressLeaderboard?.slice(0, 3).map(p => `${p.realName} (提升 ${p.improvement}%)`).join(', ') || '暂无';
 
-    // Build structured analysis section from agent's pattern recognition
     let structuredSection = '';
     if (diagnosisContext) {
       const { errorClusters, trajectories, behaviorInsights } = diagnosisContext;
@@ -305,29 +308,38 @@ export const generateClassDiagnosis = async (
     const systemPrompt = `You are an expert English teaching assistant performing a deep diagnosis of class learning data.
 An AI agent has already done structured pattern recognition on the raw data. You must leverage these patterns to provide specific, actionable, and personalized insights — NOT generic advice.
 
-Rules:
-- Mention students BY NAME when discussing focus groups
-- Reference specific error word clusters and explain WHY students might confuse them (e.g., similar prefix, shared Latin root)
-- Suggest ONE concrete classroom activity with a step-by-step outline
-- Use Chinese for all values
+FORMATTING RULES:
+- Use Chinese for ALL content
+- Use Markdown formatting in each field: **bold** for key terms, numbered lists for multiple points
+- Start EACH field with a one-sentence bold summary, then follow with numbered details
+- Keep each field concise: 3-5 numbered points max
 
-Output ONLY a valid JSON object:
+Output ONLY a valid JSON object with exactly these 5 fields:
 {
-  "weakness_analysis": "string - 基于错词聚类的深度归因分析(引用具体的形近词/单元集中出错/长词等模式,3-4句话)",
-  "focus_group": "string - 指名道姓的学生关注建议(区分退步型/突击型/未活跃型给出不同策略,3-4句话)",
-  "teaching_suggestion": "string - 一个具体的课堂活动方案(包含活动名称、步骤和预期效果,3-4句话)"
-}`;
+  "weakness_analysis": "**一句话总结本班词汇薄弱环节**\n\n1. 第一个归因要点（引用具体错词和聚类模式）\n2. 第二个归因要点\n3. ...",
+  "focus_group": "**一句话总结需重点关注的学生**\n\n1. **学生姓名** — 情况描述和建议策略\n2. ...",
+  "unit_difficulty": "**一句话总结各单元难度分布**\n\n1. 最难单元及原因\n2. 第二难单元\n3. ...",
+  "action_items": "**一句话总结本周教师待办**\n\n1. 第一项行动（具体、可执行）\n2. 第二项行动\n3. ...",
+  "teaching_suggestion": "**一句话总结推荐的课堂活动**\n\n1. 活动名称与目标\n2. 实施步骤\n3. 预期效果"
+}
+
+Field descriptions:
+- weakness_analysis: 基于错词聚类的深度归因分析，引用形近词混淆、单元集中出错、长词拼写困难等具体模式
+- focus_group: 指名道姓的学生关注建议，区分退步型/突击型/未活跃型给出差异化策略
+- unit_difficulty: 根据错词的单元分布，排出各单元难度，分析哪些单元是全班薄弱环节
+- action_items: 基于以上分析给出本周3-5项具体、可执行的行动项清单
+- teaching_suggestion: 一个具体的课堂活动方案，包含活动名称、步骤和预期效果`;
 
     const userPrompt = `
       Class Performance Data:
       - Overall Accuracy: ${metrics.classAccuracy}%
       - Mastery Rate: ${metrics.classMastery}%
       - Total Students: ${metrics.totalStudents}
-      - Top Error Words: ${errorWordsContext || 'None'}
+      - Top Error Words (with unit info): ${errorWordsContext || 'None'}
       - Inactive Students (>7 days): ${inactiveContext || 'None'}
       - Top Progress Students: ${progressContext}
       ${structuredSection}
-      Please analyze ALL the above data (especially the Agent Pattern Recognition sections) and return the required JSON.
+      Please analyze ALL the above data (especially the Agent Pattern Recognition sections) and return the required JSON with 5 fields.
     `;
 
     const responseText = await callChatCompletion(systemPrompt, userPrompt);
@@ -337,7 +349,13 @@ Output ONLY a valid JSON object:
       throw new Error("Invalid response format from AI");
     }
 
-    return parsed as { weakness_analysis: string; focus_group: string; teaching_suggestion: string; };
+    return {
+      weakness_analysis: parsed.weakness_analysis,
+      focus_group: parsed.focus_group,
+      unit_difficulty: parsed.unit_difficulty || '暂无单元难度数据',
+      action_items: parsed.action_items || '暂无行动项',
+      teaching_suggestion: parsed.teaching_suggestion,
+    };
   } catch (error) {
     console.error('Failed to generate class diagnosis:', error);
     throw new Error('生成班级诊断失败，请检查 AI 配置或稍后重试。');
