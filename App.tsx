@@ -234,15 +234,13 @@ export default function App() {
   const userId = role === UserRole.STUDENT ? loginForm.studentId : loginForm.username;
 
 
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (runAgent = false) => {
     const allWords = await storageService.getWords();
     setWords(allWords);
 
     if (role === UserRole.TEACHER) {
-      // Load class list
       const cls = await storageService.getClasses();
       setClassList(cls);
-      // Pass selectedClassId to all teacher APIs
       const cid = selectedClassId;
       const metrics = await storageService.getTeacherMetrics(cid);
       setTeacherMetrics(metrics);
@@ -252,9 +250,10 @@ export default function App() {
       setQuizCompletionStats(qStats);
       const lbData = await storageService.getLeaderboardData(cid);
       setLeaderboardData(lbData);
-      // Agent: autonomous anomaly detection + self-reflection
-      runAgentAnalysis(cid).then(setAgentAlerts).catch(() => setAgentAlerts([]));
-      import('./services/agentService').then(m => m.evaluateAlertOutcomes().then(setAlertEval)).catch(() => {});
+      if (runAgent) {
+        runAgentAnalysis(cid).then(setAgentAlerts).catch(() => setAgentAlerts([]));
+        import('./services/agentService').then(m => m.evaluateAlertOutcomes().then(setAlertEval)).catch(() => {});
+      }
     } else if (role === UserRole.STUDENT && userId) {
       const progress = await storageService.getUserProgress(userId, loginForm.studentName);
       setUserProgress(progress);
@@ -274,14 +273,9 @@ export default function App() {
   useEffect(() => {
     if (!isLoggedIn) return;
     storageService.init();
-    refreshData(); // Initial load
-    const interval = setInterval(refreshData, 30000);
-    const onFocus = () => refreshData();
-    window.addEventListener('focus', onFocus);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
-    };
+    refreshData(true); // initial load with agent analysis
+    const interval = setInterval(() => refreshData(false), 300000); // 5 min auto-poll without agent
+    return () => { clearInterval(interval); };
   }, [isLoggedIn, refreshData]);
 
   // --- HANDLERS ---
@@ -1047,17 +1041,25 @@ export default function App() {
                         return `今天是第 ${week} 教学周。`;
                       })() : '请在设置中配置学期开始日期。'}</p>
                     </div>
-                    {/* Class Selector Dropdown */}
-                    {classList.length > 0 && (
-                      <select
-                        className="px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-academy-500 cursor-pointer"
-                        value={selectedClassId || ''}
-                        onChange={e => setSelectedClassId(e.target.value || null)}
+                    <div className="flex items-center gap-2">
+                      {classList.length > 0 && (
+                        <select
+                          className="px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-academy-500 cursor-pointer"
+                          value={selectedClassId || ''}
+                          onChange={e => setSelectedClassId(e.target.value || null)}
+                        >
+                          <option value="">全部班级</option>
+                          {classList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      )}
+                      <button
+                        onClick={() => refreshData(true)}
+                        className="p-2 text-gray-500 hover:text-academy-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="刷新数据（含智能分析）"
                       >
-                        <option value="">全部班级</option>
-                        {classList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                    )}
+                        <RefreshCw size={18} />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Agent Alert Panel */}

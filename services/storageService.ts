@@ -55,6 +55,36 @@ const INITIAL_PROGRESS: UserProgress = {
 let cachedAllWords: Word[] | null = null;
 let cachedAllWordsTime: number = 0;
 
+// Short-lived cache for class user IDs (avoids repeated user_progress queries within one refresh cycle)
+let cachedClassUserIds: { classId: string | null; userIds: string[]; time: number } | null = null;
+const CLASS_USER_CACHE_TTL = 10000; // 10 seconds
+
+async function getClassUserIds(classId: string | null): Promise<string[]> {
+  const now = Date.now();
+  if (cachedClassUserIds && cachedClassUserIds.classId === classId && (now - cachedClassUserIds.time < CLASS_USER_CACHE_TTL)) {
+    return cachedClassUserIds.userIds;
+  }
+  let query = supabase.from('user_progress').select('user_id');
+  if (classId) query = query.eq('class_id', classId);
+  else query = query.not('class_id', 'is', 'null');
+  const { data } = await query;
+  const userIds = (data || []).map(s => s.user_id);
+  cachedClassUserIds = { classId, userIds, time: now };
+  return userIds;
+}
+
+const WORD_SELECT_COLS = 'id, term, definition, example_sentence, example_sentence_translation, extended_sentence, extended_sentence_translation, unit, category, difficulty';
+
+async function getCachedWordsByIds(ids: string[]): Promise<Word[]> {
+  if (cachedAllWords && cachedAllWords.length > 0) {
+    const idSet = new Set(ids);
+    return cachedAllWords.filter(w => idSet.has(w.id));
+  }
+  if (ids.length === 0) return [];
+  const { data } = await supabase.from('words').select(WORD_SELECT_COLS).in('id', ids);
+  return (data || []).map(mapDbWordToWord);
+}
+
 export const storageService = {
   // No init needed for Supabase — DB is always ready
   init: () => { },
@@ -155,7 +185,7 @@ export const storageService = {
 
     const { data, error } = await supabase
       .from('words')
-      .select('*')
+      .select(WORD_SELECT_COLS)
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -163,18 +193,19 @@ export const storageService = {
       return cachedAllWords || [];
     }
 
-    // Map DB snake_case to frontend camelCase
     const words = (data || []).map(mapDbWordToWord);
     cachedAllWords = words;
     cachedAllWordsTime = now;
     return words;
   },
 
-  // Get words by unit
   getWordsByUnit: async (unit: string): Promise<Word[]> => {
+    if (cachedAllWords && cachedAllWords.length > 0) {
+      return cachedAllWords.filter(w => w.unit === unit);
+    }
     const { data, error } = await supabase
       .from('words')
-      .select('*')
+      .select(WORD_SELECT_COLS)
       .eq('unit', unit)
       .order('created_at', { ascending: true });
 
@@ -243,7 +274,7 @@ export const storageService = {
   getUserProgress: async (userId: string, realName?: string): Promise<UserProgress> => {
     const { data, error } = await supabase
       .from('user_progress')
-      .select('*')
+      .select('user_id, total_games_played, perfect_scores, current_streak, last_practice_date, unlocked_achievement_ids, real_name, class_id')
       .eq('user_id', userId)
       .single();
 
@@ -288,7 +319,7 @@ export const storageService = {
   getAllStudentsProgress: async (): Promise<UserProgress[]> => {
     const { data, error } = await supabase
       .from('user_progress')
-      .select('*')
+      .select('user_id, total_games_played, perfect_scores, current_streak, last_practice_date, unlocked_achievement_ids, real_name, class_id')
       .not('class_id', 'is', 'null')
       .order('last_practice_date', { ascending: false });
 
@@ -315,8 +346,8 @@ export const storageService = {
     sevenDaysAgo.setDate(today.getDate() - 7);
     const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
 
-    // 1. Fetch progress (optionally filtered by class)
-    let progressQuery = supabase.from('user_progress').select('*');
+    const PROGRESS_COLS = 'user_id, real_name, last_practice_date, current_streak, total_games_played, perfect_scores, class_id';
+    let progressQuery = supabase.from('user_progress').select(PROGRESS_COLS);
     if (classId) progressQuery = progressQuery.eq('class_id', classId);
     else progressQuery = progressQuery.not('class_id', 'is', 'null');
     const { data: allProgress } = await progressQuery;
@@ -351,11 +382,12 @@ export const storageService = {
       lastPracticeDate: p.last_practice_date || '无记录'
     }));
 
-    // 2. Fetch word learning states (filtered by class user IDs if needed)
-    let statesQuery = supabase.from('word_learning_states').select('word_id, user_id, interval_days, consecutive_correct, error_count, total_attempts');
-    if (classId && classUserIds.length > 0) statesQuery = statesQuery.in('user_id', classUserIds);
-    else if (classId && classUserIds.length === 0) return { classMastery: 0, classAccuracy: 0, topErrorWords: [], inactiveStudents, streakLeaderboard, allStudents: [], totalStudents: progress.length, progressLeaderboard: [] };
-    const { data: allStates } = await statesQuery;
+    // 2. Fetch word learning states — always filter by known class user IDs
+    if (classUserIds.length === 0) return { classMastery: 0, classAccuracy: 0, topErrorWords: [], inactiveStudents, streakLeaderboard, allStudents: [], totalStudents: progress.length, progressLeaderboard: [] };
+    const { data: allStates } = await supabase
+      .from('word_learning_states')
+      .select('word_id, user_id, interval_days, consecutive_correct, error_count, total_attempts')
+      .in('user_id', classUserIds);
     const states = allStates || [];
 
     // Average Accuracy: correct answers / total attempts (word-level)
@@ -386,21 +418,16 @@ export const storageService = {
 
     let topErrorWords: { word: Word; errorCount: number; totalAttempts: number }[] = [];
     if (sortedErrorIds.length > 0) {
-      const { data: words } = await supabase
-        .from('words')
-        .select('*')
-        .in('id', sortedErrorIds.map(e => e[0]));
-
-      if (words) {
-        topErrorWords = sortedErrorIds.map(([id, stats]) => {
-          const w = words.find(item => item.id === id);
-          return {
-            word: w ? mapDbWordToWord(w) : { id: id, term: '未知', definition: '未知', unit: '0', category: 'TEXTBOOK' as const, difficulty: 1 },
-            errorCount: stats.errors,
-            totalAttempts: stats.attempts,
-          };
-        });
-      }
+      const errorWordIds = sortedErrorIds.map(e => e[0]);
+      const words = await getCachedWordsByIds(errorWordIds);
+      topErrorWords = sortedErrorIds.map(([id, stats]) => {
+        const w = words.find(item => item.id === id);
+        return {
+          word: w || { id: id, term: '未知', definition: '未知', unit: '0', category: 'TEXTBOOK' as const, difficulty: 1 },
+          errorCount: stats.errors,
+          totalAttempts: stats.attempts,
+        };
+      });
     }
 
     // --- Progress Leaderboard (超越自我榜 - 增值评价) ---
@@ -409,14 +436,11 @@ export const storageService = {
     const sixDaysAgoStr = new Date(todayMillis - 6 * 24 * 60 * 60 * 1000).toISOString();
     const threeDaysAgoTime = todayMillis - 3 * 24 * 60 * 60 * 1000;
 
-    let sessionsQuery = supabase
+    const sessionsQuery = supabase
       .from('wc_practice_sessions')
       .select('user_id, correct_count, total_count, created_at')
-      .gte('created_at', sixDaysAgoStr);
-
-    if (classId && classUserIds.length > 0) {
-      sessionsQuery = sessionsQuery.in('user_id', classUserIds);
-    }
+      .gte('created_at', sixDaysAgoStr)
+      .in('user_id', classUserIds);
     const { data: recentSessions } = await sessionsQuery;
 
     interface UserProgressStats {
@@ -505,11 +529,11 @@ export const storageService = {
       .slice(0, 10)
       .map(p => ({ userId: p.user_id, realName: p.real_name || '未知姓名', perfectScores: p.perfect_scores }));
 
-    // 2. Vocabulary Mastery (filtered by class user IDs)
-    let statesQuery = supabase.from('word_learning_states').select('user_id, interval_days, error_count, total_attempts');
-    if (classId && classUserIds.length > 0) statesQuery = statesQuery.in('user_id', classUserIds);
-    else if (classId && classUserIds.length === 0) return { practiceChampions, perfectScoreChampions, vocabularyMasters: [] };
-    const { data: allStates } = await statesQuery;
+    if (classUserIds.length === 0) return { practiceChampions, perfectScoreChampions, vocabularyMasters: [] };
+    const { data: allStates } = await supabase
+      .from('word_learning_states')
+      .select('user_id, interval_days')
+      .in('user_id', classUserIds);
 
     const masteryMap = new Map<string, number>();
     (allStates || []).forEach(s => {
@@ -540,16 +564,8 @@ export const storageService = {
 
     const emptyTrend = dates.map(d => ({ date: new Date(d).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }), accuracy: 0 }));
 
-    // Get class user IDs
-    let userFilter: string[] | null = null;
-    if (classId) {
-      const { data: classStudents } = await supabase.from('user_progress').select('user_id').eq('class_id', classId);
-      userFilter = (classStudents || []).map(s => s.user_id);
-    } else {
-      const { data: classStudents } = await supabase.from('user_progress').select('user_id').not('class_id', 'is', 'null');
-      userFilter = (classStudents || []).map(s => s.user_id);
-    }
-    if (!userFilter || userFilter.length === 0) return emptyTrend;
+    const userFilter = await getClassUserIds(classId ?? null);
+    if (userFilter.length === 0) return emptyTrend;
 
     // Fetch per-session records (each row = one completed practice game)
     let sessionsQuery = supabase.from('practice_sessions')
@@ -645,40 +661,25 @@ export const storageService = {
 
       const practicedIds = new Set((allPracticedStates || []).map(s => s.word_id));
 
-      // Get all words, ordered by unit so we go through units in order
-      const { data: allWords } = await supabase
-        .from('words')
-        .select('id, unit')
-        .order('unit', { ascending: true })
-        .order('created_at', { ascending: true });
-
-      if (allWords) {
-        for (const w of allWords) {
-          if (collectedWordIds.length >= targetCount) break;
-          if (!practicedIds.has(w.id) && !collectedWordIds.includes(w.id)) {
-            collectedWordIds.push(w.id);
-          }
+      // Use cache for unseen word discovery
+      const allWords = cachedAllWords || await storageService.getWords();
+      const sorted = [...allWords].sort((a, b) => a.unit.localeCompare(b.unit));
+      for (const w of sorted) {
+        if (collectedWordIds.length >= targetCount) break;
+        if (!practicedIds.has(w.id) && !collectedWordIds.includes(w.id)) {
+          collectedWordIds.push(w.id);
         }
       }
     }
 
-    // --- Fetch full Word objects ---
     if (collectedWordIds.length === 0) {
       return [];
     }
 
-    const { data: wordRows, error: wordsError } = await supabase
-      .from('words')
-      .select('*')
-      .in('id', collectedWordIds);
-
-    if (wordsError || !wordRows) return [];
-
-    // Maintain the priority order we built
+    const words = await getCachedWordsByIds(collectedWordIds);
     return collectedWordIds
-      .map(id => wordRows.find(w => w.id === id))
-      .filter(Boolean)
-      .map(mapDbWordToWord);
+      .map(id => words.find(w => w.id === id))
+      .filter((w): w is Word => !!w);
   },
 
   // Get words due for review today (Ebbinghaus)
@@ -696,20 +697,10 @@ export const storageService = {
     }
 
     const wordIds = data.map(s => s.word_id).slice(0, limit);
-
-    const { data: words, error: wordsError } = await supabase
-      .from('words')
-      .select('*')
-      .in('id', wordIds);
-
-    if (wordsError || !words) {
-      return [];
-    }
-
-    return words.map(mapDbWordToWord);
+    const words = await getCachedWordsByIds(wordIds);
+    return words;
   },
 
-  // Get statistics for mistakes
   getMistakeStats: async (userId: string): Promise<{ word: Word; errorCount: number }[]> => {
     const { data, error } = await supabase
       .from('word_learning_states')
@@ -724,17 +715,12 @@ export const storageService = {
     }
 
     const wordIds = data.map(s => s.word_id);
-    const { data: words, error: wordsError } = await supabase
-      .from('words')
-      .select('*')
-      .in('id', wordIds);
-
-    if (wordsError || !words) return [];
+    const words = await getCachedWordsByIds(wordIds);
 
     return data
       .map(state => {
         const word = words.find(w => w.id === state.word_id);
-        return word ? { word: mapDbWordToWord(word), errorCount: state.error_count } : null;
+        return word ? { word, errorCount: state.error_count } : null;
       })
       .filter((item): item is { word: Word; errorCount: number } => item !== null);
   },
@@ -744,10 +730,9 @@ export const storageService = {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
 
-    // Fetch existing state
     const { data: existing } = await supabase
       .from('word_learning_states')
-      .select('*')
+      .select('interval_days, consecutive_correct, error_count, total_attempts')
       .eq('user_id', userId)
       .eq('word_id', wordId)
       .single();
@@ -918,7 +903,7 @@ export const storageService = {
   },
 
   getActiveQuizzes: async (studentClassId?: string | null): Promise<Quiz[]> => {
-    let query = supabase.from('quizzes').select('*').eq('active', true);
+    let query = supabase.from('quizzes').select('id, title, published_at, class_id, content, active, target_student_ids').eq('active', true);
     // If student has a class, show quizzes for their class OR quizzes with no class (global)
     if (studentClassId) {
       query = query.or(`class_id.eq.${studentClassId},class_id.is.null`);
@@ -945,8 +930,7 @@ export const storageService = {
     completedStudents: { name: string; bestScore: number; total: number; attempts: number }[];
     incompleteStudents: { name: string }[];
   }[]> => {
-    // Get active quizzes (filtered by class if specified)
-    let quizQuery = supabase.from('quizzes').select('*').eq('active', true);
+    let quizQuery = supabase.from('quizzes').select('id, title, published_at, class_id, content, active, target_student_ids').eq('active', true);
     if (classId) quizQuery = quizQuery.or(`class_id.eq.${classId},class_id.is.null`);
     const { data: quizzesData } = await quizQuery.order('published_at', { ascending: false });
     const quizzes = (quizzesData as Quiz[]) || [];
@@ -960,10 +944,11 @@ export const storageService = {
     const allStudents = (students || []).map(s => ({ userId: s.user_id, name: s.real_name || s.user_id }));
     const totalStudents = allStudents.length;
 
-    // Get all quiz results (with user_id for per-student breakdown)
+    const quizIds = quizzes.map(q => q.id);
     const { data: results } = await supabase
       .from('quiz_results')
-      .select('quiz_id, user_id, score, total');
+      .select('quiz_id, user_id, score, total')
+      .in('quiz_id', quizIds);
 
     // Group results by quiz_id -> user_id -> best score & attempts
     const resultsByQuiz = new Map<string, Map<string, { bestScore: number; total: number; attempts: number }>>();
@@ -1075,10 +1060,9 @@ export const storageService = {
     quizResults: { title: string; score: number; total: number; completedAt: string }[];
     classComparison: { totalStudents: number; classAvgAccuracy: number; classAvgGames: number; rank: number };
   }> => {
-    // 1. User progress
     const { data: prog } = await supabase
       .from('user_progress')
-      .select('*')
+      .select('user_id, real_name, total_games_played, perfect_scores, current_streak, last_practice_date, unlocked_achievement_ids, class_id')
       .eq('user_id', userId)
       .single();
 
@@ -1167,8 +1151,8 @@ export const storageService = {
     const classUserIds = (allProgress || []).map(p => p.user_id);
 
     let statesQuery = supabase.from('word_learning_states').select('user_id, error_count, total_attempts');
-    if (classId && classUserIds.length > 0) statesQuery = statesQuery.in('user_id', classUserIds);
-    else if (classId && classUserIds.length === 0) statesQuery = statesQuery.eq('user_id', 'NON_EXISTENT_USER'); // Force empty if no users in class
+    if (classUserIds.length > 0) statesQuery = statesQuery.in('user_id', classUserIds);
+    else statesQuery = statesQuery.eq('user_id', 'NON_EXISTENT_USER');
     const { data: allLearningStates } = await statesQuery;
 
     const studentStats = new Map<string, { attempts: number; errors: number; games: number }>();
@@ -1237,7 +1221,7 @@ export const storageService = {
   }> => {
     const { data: sessions } = await supabase
       .from('practice_sessions')
-      .select('*')
+      .select('unit, correct_count, total_count, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
 
@@ -1293,15 +1277,8 @@ export const storageService = {
     since.setDate(since.getDate() - days);
     const sinceStr = since.toISOString();
 
-    let userFilter: string[] | null = null;
-    if (classId) {
-      const { data } = await supabase.from('user_progress').select('user_id').eq('class_id', classId);
-      userFilter = (data || []).map(s => s.user_id);
-    } else {
-      const { data } = await supabase.from('user_progress').select('user_id').not('class_id', 'is', 'null');
-      userFilter = (data || []).map(s => s.user_id);
-    }
-    if (!userFilter || userFilter.length === 0) return [];
+    const userFilter = await getClassUserIds(classId);
+    if (userFilter.length === 0) return [];
 
     const { data: sessions } = await supabase
       .from('practice_sessions')
@@ -1313,15 +1290,8 @@ export const storageService = {
   },
 
   getClassLearningStates: async (classId: string | null) => {
-    let userFilter: string[] | null = null;
-    if (classId) {
-      const { data } = await supabase.from('user_progress').select('user_id').eq('class_id', classId);
-      userFilter = (data || []).map(s => s.user_id);
-    } else {
-      const { data } = await supabase.from('user_progress').select('user_id').not('class_id', 'is', 'null');
-      userFilter = (data || []).map(s => s.user_id);
-    }
-    if (!userFilter || userFilter.length === 0) return [];
+    const userFilter = await getClassUserIds(classId);
+    if (userFilter.length === 0) return [];
 
     const { data: states } = await supabase
       .from('word_learning_states')
@@ -1354,7 +1324,7 @@ export const storageService = {
   getActivePlan: async (userId: string): Promise<LearningPlan | null> => {
     const { data } = await supabase
       .from('learning_plans')
-      .select('*')
+      .select('id, user_id, week_start, target_new_words, target_review_words, target_sessions, completed_new_words, completed_review_words, completed_sessions, focus_word_ids, status, previous_completion_rate')
       .eq('user_id', userId)
       .eq('status', 'active')
       .order('week_start', { ascending: false })
