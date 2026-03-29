@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { UserRole, Word, ClassInfo, ClassGroup, StudentRecord, UserProgress, Achievement, TeacherMetrics, QuizQuestion, Quiz } from './types';
+import { UserRole, Word, ClassInfo, ClassGroup, StudentRecord, UserProgress, Achievement, TeacherMetrics, QuizQuestion, Quiz, AgentAlert } from './types';
 import DictationGame from './components/DictationGame';
 import TrendChart from './components/TrendChart';
 import QuizTake from './components/QuizTake';
 import { generateClozeTest } from './services/geminiService';
 import { storageService, ACHIEVEMENTS } from './services/storageService';
 import AiTutor from './components/AiTutor';
+import { runAgentAnalysis } from './services/agentService';
 import {
   BookOpen,
   Users,
@@ -158,6 +159,8 @@ export default function App() {
   // Teacher Metrics State
   const [teacherMetrics, setTeacherMetrics] = useState<TeacherMetrics | null>(null);
   const [accuracyTrend, setAccuracyTrend] = useState<{ date: string, accuracy: number }[]>([]);
+  const [agentAlerts, setAgentAlerts] = useState<AgentAlert[]>([]);
+  const [alertsDismissed, setAlertsDismissed] = useState(false);
   const [isGeneratingDiagnosis, setIsGeneratingDiagnosis] = useState(false);
   const [classDiagnosis, setClassDiagnosis] = useState<{ weakness_analysis: string; focus_group: string; teaching_suggestion: string } | null>(null);
 
@@ -237,6 +240,8 @@ export default function App() {
       setQuizCompletionStats(qStats);
       const lbData = await storageService.getLeaderboardData(cid);
       setLeaderboardData(lbData);
+      // Agent: autonomous anomaly detection
+      runAgentAnalysis(cid).then(setAgentAlerts).catch(() => setAgentAlerts([]));
     } else if (role === UserRole.STUDENT && userId) {
       const progress = await storageService.getUserProgress(userId, loginForm.studentName);
       setUserProgress(progress);
@@ -1010,6 +1015,35 @@ export default function App() {
                       </select>
                     )}
                   </div>
+
+                  {/* Agent Alert Panel */}
+                  {agentAlerts.length > 0 && !alertsDismissed && (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-8 overflow-hidden animate-fade-in">
+                      <div className="px-6 py-4 bg-gradient-to-r from-red-50 to-amber-50 border-b border-gray-100 flex justify-between items-center">
+                        <h3 className="font-bold text-base text-gray-800 flex items-center gap-2">
+                          <Zap size={18} className="text-amber-500" /> 智能预警
+                          <span className="text-xs font-normal bg-red-100 text-red-600 px-2 py-0.5 rounded-full ml-1">{agentAlerts.length} 条</span>
+                        </h3>
+                        <button onClick={() => setAlertsDismissed(true)} className="text-gray-400 hover:text-gray-600 transition-colors p-1" title="暂时关闭">
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <div className="divide-y divide-gray-50 max-h-[280px] overflow-y-auto">
+                        {agentAlerts.map(alert => (
+                          <div key={alert.id} className="px-6 py-3 flex items-start gap-3 hover:bg-gray-50/50 transition-colors">
+                            <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${alert.severity === 'critical' ? 'bg-red-500' : alert.severity === 'warning' ? 'bg-amber-400' : 'bg-blue-400'}`} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold text-gray-800">{alert.title}</p>
+                              <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{alert.description}</p>
+                            </div>
+                            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded flex-shrink-0 ${alert.severity === 'critical' ? 'bg-red-100 text-red-600' : alert.severity === 'warning' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
+                              {alert.severity === 'critical' ? '严重' : alert.severity === 'warning' ? '注意' : '提示'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Trend Line Chart */}
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-8">

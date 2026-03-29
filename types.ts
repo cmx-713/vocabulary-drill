@@ -110,3 +110,19 @@ export interface AppState {
   currentUserRole: UserRole;
   selectedUnit: string | null;
 }
+
+// --- Agent System Types ---
+
+export type AlertSeverity = 'critical' | 'warning' | 'info';
+export type AlertCategory = 'accuracy_drop' | 'error_word_spike' | 'stagnation' | 'mastery_regression';
+
+export interface AgentAlert {
+  id: string;
+  category: AlertCategory;
+  severity: AlertSeverity;
+  title: string;
+  description: string;
+  relatedStudents?: string[];
+  relatedWords?: string[];
+  detectedAt: string;
+}

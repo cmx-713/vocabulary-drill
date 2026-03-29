@@ -1274,6 +1274,69 @@ export const storageService = {
     };
   },
 
+  // --- Agent Data Queries ---
+
+  getRecentSessionsByClass: async (classId: string | null, days: number = 6) => {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const sinceStr = since.toISOString();
+
+    let userFilter: string[] | null = null;
+    if (classId) {
+      const { data } = await supabase.from('user_progress').select('user_id').eq('class_id', classId);
+      userFilter = (data || []).map(s => s.user_id);
+    } else {
+      const { data } = await supabase.from('user_progress').select('user_id').not('class_id', 'is', 'null');
+      userFilter = (data || []).map(s => s.user_id);
+    }
+    if (!userFilter || userFilter.length === 0) return [];
+
+    const { data: sessions } = await supabase
+      .from('practice_sessions')
+      .select('user_id, correct_count, total_count, created_at')
+      .gte('created_at', sinceStr)
+      .in('user_id', userFilter);
+
+    return sessions || [];
+  },
+
+  getClassLearningStates: async (classId: string | null) => {
+    let userFilter: string[] | null = null;
+    if (classId) {
+      const { data } = await supabase.from('user_progress').select('user_id').eq('class_id', classId);
+      userFilter = (data || []).map(s => s.user_id);
+    } else {
+      const { data } = await supabase.from('user_progress').select('user_id').not('class_id', 'is', 'null');
+      userFilter = (data || []).map(s => s.user_id);
+    }
+    if (!userFilter || userFilter.length === 0) return [];
+
+    const { data: states } = await supabase
+      .from('word_learning_states')
+      .select('user_id, word_id, interval_days, error_count, total_attempts, consecutive_correct, last_reviewed')
+      .in('user_id', userFilter);
+
+    return states || [];
+  },
+
+  getStudentNames: async (classId: string | null): Promise<Record<string, string>> => {
+    let query = supabase.from('user_progress').select('user_id, real_name');
+    if (classId) query = query.eq('class_id', classId);
+    else query = query.not('class_id', 'is', 'null');
+    const { data } = await query;
+    const map: Record<string, string> = {};
+    (data || []).forEach(s => { map[s.user_id] = s.real_name || s.user_id; });
+    return map;
+  },
+
+  getWordTerms: async (wordIds: string[]): Promise<Record<string, string>> => {
+    if (wordIds.length === 0) return {};
+    const { data } = await supabase.from('words').select('id, term').in('id', wordIds);
+    const map: Record<string, string> = {};
+    (data || []).forEach(w => { map[w.id] = w.term; });
+    return map;
+  },
+
   // --- Notifications ---
   sendReminders,
   getUnreadNotifications,
