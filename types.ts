@@ -100,7 +100,7 @@ export interface TeacherMetrics {
   topErrorWords: { word: Word; errorCount: number; totalAttempts: number }[];
   inactiveStudents: { userId: string; realName: string; lastPracticeDate: string }[];
   streakLeaderboard: { userId: string; realName: string; streak: number }[];
-  allStudents: { userId: string; realName: string; streak: number; lastPracticeDate: string }[];
+  allStudents: { userId: string; realName: string; streak: number; lastPracticeDate: string; totalGamesPlayed: number; perfectScores: number }[];
   totalStudents: number;
   progressLeaderboard: { userId: string; realName: string; improvement: number }[];
 }

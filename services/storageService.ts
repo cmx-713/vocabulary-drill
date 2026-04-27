@@ -379,7 +379,9 @@ export const storageService = {
       userId: p.user_id,
       realName: p.real_name || '未知姓名',
       streak: p.current_streak,
-      lastPracticeDate: p.last_practice_date || '无记录'
+      lastPracticeDate: p.last_practice_date || '无记录',
+      totalGamesPlayed: p.total_games_played || 0,
+      perfectScores: p.perfect_scores || 0,
     }));
 
     // 2. Fetch word learning states — always filter by known class user IDs
@@ -929,6 +931,7 @@ export const storageService = {
     completionRate: number;
     completedStudents: { name: string; bestScore: number; total: number; attempts: number }[];
     incompleteStudents: { name: string }[];
+    content: QuizQuestion[];
   }[]> => {
     let quizQuery = supabase.from('quizzes').select('id, title, published_at, class_id, content, active, target_student_ids').eq('active', true);
     if (classId) quizQuery = quizQuery.or(`class_id.eq.${classId},class_id.is.null`);
@@ -1002,6 +1005,7 @@ export const storageService = {
         completionRate: quizTotalStudents > 0 ? Math.round((completedCount / quizTotalStudents) * 100) : 0,
         completedStudents,
         incompleteStudents,
+        content: (q.content as QuizQuestion[]) || [],
       };
     });
   },

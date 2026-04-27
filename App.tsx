@@ -48,7 +48,7 @@ import {
   Medal,
   ArrowUp,
   Sparkles,
-  Volume2, Wand2, FileText, Printer, Save, Check, ChevronDown, ChevronUp, Trash2, Edit3, Star, Zap, Send, Search, LogIn, ChevronRight, Info, Calendar, Download, Loader2, Brain, Lightbulb, Bell
+  Volume2, Wand2, FileText, Printer, Save, Check, ChevronDown, ChevronUp, Trash2, Edit3, Star, Zap, Send, Search, LogIn, ChevronRight, Info, Calendar, Download, Loader2, Brain, Lightbulb, Bell, Eye
 } from 'lucide-react';
 
 const MOCK_CLASSES: ClassGroup[] = [
@@ -190,8 +190,10 @@ export default function App() {
     totalStudents: number; completedCount: number; averageScore: number; completionRate: number;
     completedStudents: { name: string; bestScore: number; total: number; attempts: number }[];
     incompleteStudents: { name: string }[];
+    content: QuizQuestion[];
   }[]>([]);
   const [expandedQuizId, setExpandedQuizId] = useState<string | null>(null);
+  const [viewingQuiz, setViewingQuiz] = useState<{ title: string; content: QuizQuestion[] } | null>(null);
 
   // Teaching Week & Leaderboard states
   const [semesterStart, setSemesterStart] = useState(localStorage.getItem('LEXITRACK_SEMESTER_START') || '');
@@ -1135,9 +1137,6 @@ export default function App() {
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                             {(teacherMetrics?.allStudents || []).map(student => {
-                              // Find full data from leaderboard data
-                              const practiceInfo = leaderboardData.practiceChampions.find(p => p.userId === student.userId);
-                              const perfectInfo = leaderboardData.perfectScoreChampions.find(p => p.userId === student.userId);
                               const inactiveInfo = teacherMetrics?.inactiveStudents.find(s => s.userId === student.userId);
                               return (
                                 <tr key={student.userId} className="hover:bg-academy-50 cursor-pointer transition-colors" onClick={() => handleViewReport(student.userId)}>
@@ -1145,8 +1144,8 @@ export default function App() {
                                     <span className="hover:underline text-academy-700">{student.realName}</span>
                                   </td>
                                   <td className="py-3 px-4 text-gray-500 font-mono text-xs">{student.userId}</td>
-                                  <td className="py-3 px-4 text-center font-bold">{practiceInfo?.totalGames || 0}</td>
-                                  <td className="py-3 px-4 text-center font-bold text-emerald-600">{perfectInfo?.perfectScores || 0}</td>
+                                  <td className="py-3 px-4 text-center font-bold">{student.totalGamesPlayed || 0}</td>
+                                  <td className="py-3 px-4 text-center font-bold text-emerald-600">{student.perfectScores || 0}</td>
                                   <td className="py-3 px-4 text-center">
                                     <span className="inline-flex items-center gap-1">{student.streak} <Flame size={12} className="text-orange-500" /></span>
                                   </td>
@@ -1416,6 +1415,13 @@ export default function App() {
                                 <p className="text-[9px] text-gray-400 uppercase">平均分</p>
                               </div>
                               <div className="flex items-center gap-1">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setViewingQuiz({ title: stat.title, content: stat.content }); }}
+                                  className="p-1.5 text-gray-400 hover:text-academy-600 hover:bg-academy-50 rounded transition-colors"
+                                  title="查看试卷内容"
+                                >
+                                  <Eye size={16} />
+                                </button>
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleDeleteQuiz(stat.quizId); }}
                                   className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
@@ -2070,6 +2076,64 @@ export default function App() {
 
 
         {reportModalJSX}
+
+        {/* Quiz Content Viewer Modal */}
+        {viewingQuiz && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setViewingQuiz(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    <FileText size={18} className="text-academy-600" />
+                    {viewingQuiz.title}
+                  </h2>
+                  <p className="text-xs text-gray-400 mt-0.5">共 {viewingQuiz.content.length} 题</p>
+                </div>
+                <button onClick={() => setViewingQuiz(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                  <X size={18} />
+                </button>
+              </div>
+              {/* Questions List */}
+              <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
+                {viewingQuiz.content.length === 0 ? (
+                  <p className="text-gray-400 text-sm text-center py-8">暂无题目内容</p>
+                ) : (
+                  viewingQuiz.content.map((q, idx) => (
+                    <div key={q.wordId || idx} className="bg-gray-50 rounded-xl border border-gray-100 p-4">
+                      <div className="flex items-start gap-3 mb-3">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-academy-600 text-white text-xs font-bold flex items-center justify-center mt-0.5">{idx + 1}</span>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-gray-800 mb-1">
+                            <span className="text-academy-700 font-bold">{q.term}</span>
+                            <span className="text-gray-400 font-normal ml-2 text-xs">— {q.translation}</span>
+                          </p>
+                          <p className="text-sm text-gray-600 bg-white rounded-lg px-3 py-2 border border-gray-200">
+                            {q.sentenceWithBlank}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 ml-9">
+                        {q.options.map((opt, oi) => (
+                          <div key={oi} className={`text-xs px-3 py-1.5 rounded-lg border font-medium ${opt === q.term ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-white border-gray-200 text-gray-600'}`}>
+                            {String.fromCharCode(65 + oi)}. {opt}
+                            {opt === q.term && <span className="ml-1 text-emerald-500">✓</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              {/* Footer */}
+              <div className="px-6 py-3 border-t border-gray-100 flex justify-end">
+                <button onClick={() => setViewingQuiz(null)} className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium transition-colors">
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </>
     );
   }
