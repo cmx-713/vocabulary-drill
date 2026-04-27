@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { UserRole, Word, ClassInfo, ClassGroup, StudentRecord, UserProgress, Achievement, TeacherMetrics, QuizQuestion, Quiz, AgentAlert } from './types';
 import DictationGame from './components/DictationGame';
@@ -235,22 +235,33 @@ export default function App() {
   // Derive userId from login form
   const userId = role === UserRole.STUDENT ? loginForm.studentId : loginForm.username;
 
+  // Generation counter to cancel stale concurrent refreshData calls
+  const refreshGenRef = useRef(0);
 
   const refreshData = useCallback(async (runAgent = false) => {
+    const gen = ++refreshGenRef.current;
+    const isStale = () => refreshGenRef.current !== gen;
+
     const allWords = await storageService.getWords();
+    if (isStale()) return;
     setWords(allWords);
 
     if (role === UserRole.TEACHER) {
       const cls = await storageService.getClasses();
+      if (isStale()) return;
       setClassList(cls);
       const cid = selectedClassId;
       const metrics = await storageService.getTeacherMetrics(cid);
+      if (isStale()) return;
       setTeacherMetrics(metrics);
       const trend = await storageService.getClassAccuracyTrend(cid);
+      if (isStale()) return;
       setAccuracyTrend(trend);
       const qStats = await storageService.getQuizCompletionStats(cid);
+      if (isStale()) return;
       setQuizCompletionStats(qStats);
       const lbData = await storageService.getLeaderboardData(cid);
+      if (isStale()) return;
       setLeaderboardData(lbData);
       if (runAgent) {
         runAgentAnalysis(cid).then(setAgentAlerts).catch(() => setAgentAlerts([]));
@@ -258,16 +269,22 @@ export default function App() {
       }
     } else if (role === UserRole.STUDENT && userId) {
       const progress = await storageService.getUserProgress(userId, loginForm.studentName);
+      if (isStale()) return;
       setUserProgress(progress);
       const review = await storageService.getDueReviewWords(userId, 5);
+      if (isStale()) return;
       setReviewWords(review);
       const mistakes = await storageService.getMistakeStats(userId);
+      if (isStale()) return;
       setMistakeStats(mistakes);
       const quizzes = await storageService.getActiveQuizzes(studentClassId);
+      if (isStale()) return;
       setActiveQuizzes(quizzes);
       const results = await storageService.getUserQuizResults(userId);
+      if (isStale()) return;
       setQuizResults(results);
       const notifs = await storageService.getUnreadNotifications(userId);
+      if (isStale()) return;
       setUnreadNotifications(notifs);
     }
   }, [role, userId, selectedClassId, loginForm.studentName, studentClassId]);
