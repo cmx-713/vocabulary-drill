@@ -374,13 +374,23 @@ export const storageService = {
         streak: p.current_streak
       }));
 
+    // Count actual practice sessions per student (more reliable than total_games_played counter)
+    const { data: sessionRows } = await supabase
+      .from('practice_sessions')
+      .select('user_id')
+      .in('user_id', classUserIds);
+    const practiceCountMap = new Map<string, number>();
+    (sessionRows || []).forEach(s => {
+      practiceCountMap.set(s.user_id, (practiceCountMap.get(s.user_id) || 0) + 1);
+    });
+
     // All Students (for the detailed modal)
     const allStudents = progress.map(p => ({
       userId: p.user_id,
       realName: p.real_name || '未知姓名',
       streak: p.current_streak,
       lastPracticeDate: p.last_practice_date || '无记录',
-      totalGamesPlayed: p.total_games_played || 0,
+      totalGamesPlayed: practiceCountMap.get(p.user_id) || 0,
       perfectScores: p.perfect_scores || 0,
     }));
 
@@ -517,12 +527,19 @@ export const storageService = {
     const progress = allProgress || [];
     const classUserIds = progress.map(p => p.user_id);
 
-    // Practice Champions
+    // Practice Champions — use practice_sessions count for accuracy
+    const { data: lbSessionRows } = classUserIds.length > 0
+      ? await supabase.from('practice_sessions').select('user_id').in('user_id', classUserIds)
+      : { data: [] };
+    const lbPracticeCountMap = new Map<string, number>();
+    (lbSessionRows || []).forEach(s => {
+      lbPracticeCountMap.set(s.user_id, (lbPracticeCountMap.get(s.user_id) || 0) + 1);
+    });
     const practiceChampions = [...progress]
-      .filter(p => p.total_games_played > 0)
-      .sort((a, b) => b.total_games_played - a.total_games_played)
-      .slice(0, 10)
-      .map(p => ({ userId: p.user_id, realName: p.real_name || '未知姓名', totalGames: p.total_games_played }));
+      .map(p => ({ userId: p.user_id, realName: p.real_name || '未知姓名', totalGames: lbPracticeCountMap.get(p.user_id) || 0 }))
+      .filter(p => p.totalGames > 0)
+      .sort((a, b) => b.totalGames - a.totalGames)
+      .slice(0, 10);
 
     // Perfect Score Champions
     const perfectScoreChampions = [...progress]
@@ -847,6 +864,8 @@ export const storageService = {
     }
 
     // Upsert progress to Supabase
+    // Note: total_games_played is now sourced from practice_sessions count in teacher view,
+    // but we still maintain it here for the student's own dashboard display.
     await supabase
       .from('user_progress')
       .upsert({
@@ -860,6 +879,18 @@ export const storageService = {
       }, {
         onConflict: 'user_id'
       });
+    // Sync total_games_played with actual practice_sessions count to prevent drift
+    const { count } = await supabase
+      .from('practice_sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+    if (count !== null && count !== updatedProgress.totalGamesPlayed) {
+      await supabase
+        .from('user_progress')
+        .update({ total_games_played: count })
+        .eq('user_id', userId);
+      updatedProgress.totalGamesPlayed = count;
+    }
 
     return { progress: updatedProgress, newAchievements: newUnlocked };
   },
