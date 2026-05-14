@@ -1126,7 +1126,14 @@ export default function App() {
 
                   {/* Stats Cards - Clean Academy Style */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <StatCard title="词汇掌握度" value={`${teacherMetrics?.classMastery || 0}%`} sub="艾宾浩斯记忆深度" icon={<BrainCircuit className="text-academy-600" size={24} />} />
+                    <StatCard
+                      title="词汇掌握度"
+                      value={`${teacherMetrics?.classMastery || 0}%`}
+                      sub={teacherMetrics?.classMasteryDetail
+                        ? `已掌握 ${teacherMetrics.classMasteryDetail.totalMastered} / 已学 ${teacherMetrics.classMasteryDetail.totalStudied} 词（${teacherMetrics.classMasteryDetail.studentsWithData} 人有数据）`
+                        : '艾宾浩斯记忆深度'}
+                      icon={<BrainCircuit className="text-academy-600" size={24} />}
+                    />
                     <StatCard title="平均正确率" value={`${teacherMetrics?.classAccuracy || 0}%`} sub="全班练习表现" icon={<Award className="text-emerald-600" size={24} />} />
                     <div onClick={() => setShowStudentDetail(!showStudentDetail)} className="cursor-pointer hover:ring-2 hover:ring-academy-300 rounded-xl transition-all">
                       <StatCard title="注册学生" value={(teacherMetrics?.totalStudents || 0).toString()} sub="点击查看详情" icon={<Users className="text-academy-600" size={24} />} />

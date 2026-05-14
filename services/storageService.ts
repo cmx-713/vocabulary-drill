@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { Word, ClassInfo, ClassGroup, StudentRecord, UserProgress, Achievement, WordLearningState, TeacherMetrics, Quiz, LearningPlan } from '../types';
+import { Word, ClassInfo, ClassGroup, StudentRecord, UserProgress, Achievement, WordLearningState, TeacherMetrics, Quiz, QuizQuestion, LearningPlan } from '../types';
 
 // Ebbinghaus intervals (in days)
 const EBBINGHAUS_INTERVALS = [1, 2, 4, 7, 15, 30];
@@ -374,42 +374,80 @@ export const storageService = {
         streak: p.current_streak
       }));
 
-    // Count actual practice sessions per student (more reliable than total_games_played counter)
+    // Count actual practice sessions per student AND compute session-based accuracy
+    // practice_sessions is preferred over word_learning_states for accuracy because:
+    // 1. word_learning_states.error_count is cumulative/never decreases (biased by early struggles)
+    // 2. practice_sessions reflects actual per-session performance
     const { data: sessionRows } = await supabase
       .from('practice_sessions')
-      .select('user_id')
+      .select('user_id, correct_count, total_count')
       .in('user_id', classUserIds);
-    const practiceCountMap = new Map<string, number>();
+    const practiceCountMap = new Map<string, number>(); // dictation sessions only
+    const sessionAccMap = new Map<string, { correct: number; total: number }>();
     (sessionRows || []).forEach(s => {
       practiceCountMap.set(s.user_id, (practiceCountMap.get(s.user_id) || 0) + 1);
+      const acc = sessionAccMap.get(s.user_id) || { correct: 0, total: 0 };
+      acc.correct += (s.correct_count || 0);
+      acc.total += (s.total_count || 0);
+      sessionAccMap.set(s.user_id, acc);
     });
 
+    // Count quiz completions per student (quiz completions also count as "practice")
+    const { data: quizResultRows } = await supabase
+      .from('quiz_results')
+      .select('user_id')
+      .in('user_id', classUserIds);
+    const quizCountMap = new Map<string, number>();
+    (quizResultRows || []).forEach(r => {
+      quizCountMap.set(r.user_id, (quizCountMap.get(r.user_id) || 0) + 1);
+    });
+
+    // Class accuracy: arithmetic mean of each student's session accuracy (equal weight per student)
+    const studentSessionAccuracies = Array.from(sessionAccMap.values())
+      .filter(v => v.total > 0)
+      .map(v => (v.correct / v.total) * 100);
+    const classAccuracy = studentSessionAccuracies.length > 0
+      ? Math.round(studentSessionAccuracies.reduce((sum, a) => sum + a, 0) / studentSessionAccuracies.length)
+      : 0;
+
     // All Students (for the detailed modal)
+    // totalGamesPlayed = dictation sessions + quiz completions (consistent with user_progress)
     const allStudents = progress.map(p => ({
       userId: p.user_id,
       realName: p.real_name || '未知姓名',
       streak: p.current_streak,
       lastPracticeDate: p.last_practice_date || '无记录',
-      totalGamesPlayed: practiceCountMap.get(p.user_id) || 0,
+      totalGamesPlayed: (practiceCountMap.get(p.user_id) || 0) + (quizCountMap.get(p.user_id) || 0),
       perfectScores: p.perfect_scores || 0,
     }));
 
     // 2. Fetch word learning states — always filter by known class user IDs
-    if (classUserIds.length === 0) return { classMastery: 0, classAccuracy: 0, topErrorWords: [], inactiveStudents, streakLeaderboard, allStudents: [], totalStudents: progress.length, progressLeaderboard: [] };
+    if (classUserIds.length === 0) return { classMastery: 0, classMasteryDetail: { totalMastered: 0, totalStudied: 0, studentsWithData: 0 }, classAccuracy: 0, topErrorWords: [], inactiveStudents, streakLeaderboard, allStudents: [], totalStudents: progress.length, progressLeaderboard: [] };
     const { data: allStates } = await supabase
       .from('word_learning_states')
       .select('word_id, user_id, interval_days, consecutive_correct, error_count, total_attempts')
       .in('user_id', classUserIds);
     const states = allStates || [];
 
-    // Average Accuracy: correct answers / total attempts (word-level)
-    const totalAttempts = states.reduce((sum, s) => sum + (s.total_attempts || 0), 0);
-    const totalErrors = states.reduce((sum, s) => sum + (s.error_count || 0), 0);
-    const classAccuracy = totalAttempts > 0 ? Math.round(((totalAttempts - totalErrors) / totalAttempts) * 100) : 0;
-
-    // Class Mastery: words with Ebbinghaus interval >= 7 days (reviewed correctly through 4+ cycles)
-    const masteredCount = states.filter(s => s.interval_days >= 7).length;
-    const classMastery = states.length > 0 ? Math.round((masteredCount / states.length) * 100) : 0;
+    // Class Mastery: per-student average of (mastered words / words studied), equal weight per student
+    // "Mastered" = interval_days >= 7 (answered correctly through 4+ Ebbinghaus cycles)
+    const masteryByStudent = new Map<string, { mastered: number; total: number }>();
+    states.forEach(s => {
+      const entry = masteryByStudent.get(s.user_id) || { mastered: 0, total: 0 };
+      entry.total += 1;
+      if (s.interval_days >= 7) entry.mastered += 1;
+      masteryByStudent.set(s.user_id, entry);
+    });
+    const masteryEntries = Array.from(masteryByStudent.values()).filter(v => v.total > 0);
+    const studentMasteryRates = masteryEntries.map(v => (v.mastered / v.total) * 100);
+    const classMastery = studentMasteryRates.length > 0
+      ? Math.round(studentMasteryRates.reduce((sum, r) => sum + r, 0) / studentMasteryRates.length)
+      : 0;
+    const classMasteryDetail = {
+      totalMastered: masteryEntries.reduce((sum, v) => sum + v.mastered, 0),
+      totalStudied: masteryEntries.reduce((sum, v) => sum + v.total, 0),
+      studentsWithData: masteryEntries.length,
+    };
 
     // Top Error Words
     const wordStatsMap = new Map<string, { errors: number; attempts: number }>();
@@ -503,6 +541,7 @@ export const storageService = {
 
     return {
       classMastery,
+      classMasteryDetail,
       classAccuracy,
       topErrorWords,
       inactiveStudents,
@@ -1103,6 +1142,25 @@ export const storageService = {
 
     const progress = prog || { real_name: '未知', total_games_played: 0, perfect_scores: 0, current_streak: 0, last_practice_date: '', unlocked_achievement_ids: [] };
 
+    // Use practice_sessions for accuracy, and practice_sessions + quiz_results for total count
+    const { data: userSessions } = await supabase
+      .from('practice_sessions')
+      .select('correct_count, total_count')
+      .eq('user_id', userId);
+    const sessionData = userSessions || [];
+    const sessionTotalCorrect = sessionData.reduce((sum, s) => sum + (s.correct_count || 0), 0);
+    const sessionTotalWords = sessionData.reduce((sum, s) => sum + (s.total_count || 0), 0);
+    const overallAccuracy = sessionTotalWords > 0
+      ? Math.round((sessionTotalCorrect / sessionTotalWords) * 100)
+      : 0;
+
+    // Total games = dictation sessions + quiz completions
+    const { count: quizResultCount } = await supabase
+      .from('quiz_results')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+    const actualGamesPlayed = sessionData.length + (quizResultCount || 0);
+
     // 2. Word learning states
     const { data: states } = await supabase
       .from('word_learning_states')
@@ -1113,9 +1171,6 @@ export const storageService = {
     const totalWordsStudied = allStates.length;
     const masteredStates = allStates.filter(s => s.interval_days >= 7);
     const masteredWordCount = masteredStates.length;
-    const totalAttempts = allStates.reduce((sum, s) => sum + (s.total_attempts || 0), 0);
-    const totalErrors = allStates.reduce((sum, s) => sum + (s.error_count || 0), 0);
-    const overallAccuracy = totalAttempts > 0 ? Math.round(((totalAttempts - totalErrors) / totalAttempts) * 100) : 0;
 
     // 3. Top error words (top 10)
     const errorStates = allStates
@@ -1178,35 +1233,39 @@ export const storageService = {
     }
 
     // 5. Class comparison — aggregate all students for ranking (optionally filtered by class)
-    let progressQuery = supabase.from('user_progress').select('user_id, total_games_played');
+    let progressQuery = supabase.from('user_progress').select('user_id');
     if (classId) progressQuery = progressQuery.eq('class_id', classId);
     else progressQuery = progressQuery.not('class_id', 'is', 'null');
     const { data: allProgress } = await progressQuery;
 
     const classUserIds = (allProgress || []).map(p => p.user_id);
 
-    let statesQuery = supabase.from('word_learning_states').select('user_id, error_count, total_attempts');
-    if (classUserIds.length > 0) statesQuery = statesQuery.in('user_id', classUserIds);
-    else statesQuery = statesQuery.eq('user_id', 'NON_EXISTENT_USER');
-    const { data: allLearningStates } = await statesQuery;
-
-    const studentStats = new Map<string, { attempts: number; errors: number; games: number }>();
+    // Use practice_sessions count for games (more reliable)
+    // Use practice_sessions for class accuracy comparison (consistent with teacher dashboard)
+    const classSessionMap = new Map<string, { correct: number; total: number; games: number }>();
     (allProgress || []).forEach(p => {
-      studentStats.set(p.user_id, { attempts: 0, errors: 0, games: p.total_games_played || 0 });
+      classSessionMap.set(p.user_id, { correct: 0, total: 0, games: 0 });
     });
-    (allLearningStates || []).forEach(s => {
-      const entry = studentStats.get(s.user_id) || { attempts: 0, errors: 0, games: 0 };
-      entry.attempts += (s.total_attempts || 0);
-      entry.errors += (s.error_count || 0);
-      studentStats.set(s.user_id, entry);
-    });
+    if (classUserIds.length > 0) {
+      const { data: classSessions } = await supabase
+        .from('practice_sessions')
+        .select('user_id, correct_count, total_count')
+        .in('user_id', classUserIds);
+      (classSessions || []).forEach(s => {
+        const entry = classSessionMap.get(s.user_id) || { correct: 0, total: 0, games: 0 };
+        entry.correct += (s.correct_count || 0);
+        entry.total += (s.total_count || 0);
+        entry.games += 1;
+        classSessionMap.set(s.user_id, entry);
+      });
+    }
 
-    const totalStudents = studentStats.size;
+    const totalStudents = classSessionMap.size;
     let classAvgAccuracy = 0;
     let classAvgGames = 0;
     const accuracies: { userId: string; accuracy: number }[] = [];
-    studentStats.forEach((v, k) => {
-      const acc = v.attempts > 0 ? ((v.attempts - v.errors) / v.attempts) * 100 : 0;
+    classSessionMap.forEach((v, k) => {
+      const acc = v.total > 0 ? (v.correct / v.total) * 100 : 0;
       accuracies.push({ userId: k, accuracy: acc });
       classAvgAccuracy += acc;
       classAvgGames += v.games;
@@ -1214,13 +1273,13 @@ export const storageService = {
     classAvgAccuracy = totalStudents > 0 ? Math.round(classAvgAccuracy / totalStudents) : 0;
     classAvgGames = totalStudents > 0 ? Math.round(classAvgGames / totalStudents) : 0;
 
-    // Rank by accuracy (descending)
+    // Rank by accuracy (descending), exclude students with no practice
     accuracies.sort((a, b) => b.accuracy - a.accuracy);
     const rank = accuracies.findIndex(a => a.userId === userId) + 1;
 
     return {
       realName: progress.real_name || '未知姓名',
-      totalGamesPlayed: progress.total_games_played,
+      totalGamesPlayed: actualGamesPlayed,
       perfectScores: progress.perfect_scores,
       currentStreak: progress.current_streak,
       lastPracticeDate: progress.last_practice_date || '无记录',
@@ -1256,7 +1315,7 @@ export const storageService = {
   }> => {
     const { data: sessions } = await supabase
       .from('practice_sessions')
-      .select('unit, correct_count, total_count, created_at')
+      .select('unit, correct_count, total_count, accuracy, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
 

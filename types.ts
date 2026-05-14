@@ -95,8 +95,9 @@ export interface UserProgress {
 }
 
 export interface TeacherMetrics {
-  classMastery: number; // Percentage of mastered words (interval > 7)
-  classAccuracy: number; // Total correct / Total attempts
+  classMastery: number; // Per-student avg mastery % (interval >= 7)
+  classMasteryDetail: { totalMastered: number; totalStudied: number; studentsWithData: number };
+  classAccuracy: number; // Per-student avg accuracy from practice_sessions
   topErrorWords: { word: Word; errorCount: number; totalAttempts: number }[];
   inactiveStudents: { userId: string; realName: string; lastPracticeDate: string }[];
   streakLeaderboard: { userId: string; realName: string; streak: number }[];
