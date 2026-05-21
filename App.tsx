@@ -292,9 +292,26 @@ export default function App() {
   useEffect(() => {
     if (!isLoggedIn) return;
     storageService.init();
+    let lastRefreshTime = Date.now();
     refreshData(true); // initial load with agent analysis
-    const interval = setInterval(() => refreshData(false), 300000); // 5 min auto-poll without agent
-    return () => { clearInterval(interval); };
+    const interval = setInterval(() => {
+      lastRefreshTime = Date.now();
+      refreshData(false);
+    }, 300000); // 5 min auto-poll without agent
+
+    // On tab return, only trigger a refresh if it's been > 5 min since last one (throttle)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastRefreshTime < 300000) return; // throttle: max 1 refresh per 5 min
+      lastRefreshTime = Date.now();
+      refreshData(false);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [isLoggedIn, refreshData]);
 
   // --- HANDLERS ---
@@ -1071,6 +1088,18 @@ export default function App() {
                           {classList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       )}
+                      <button
+                        onClick={async () => {
+                          storageService.clearWordCache();
+                          const allWords = await storageService.getWords(true);
+                          setWords(allWords);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:text-academy-600 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200"
+                        title="从数据库重新加载词库（导入新词汇后使用）"
+                      >
+                        <Database size={15} />
+                        <span>刷新词库</span>
+                      </button>
                       <button
                         onClick={() => refreshData(true)}
                         className="p-2 text-gray-500 hover:text-academy-600 hover:bg-gray-100 rounded-lg transition-colors"

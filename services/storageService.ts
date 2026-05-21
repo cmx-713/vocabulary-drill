@@ -54,6 +54,7 @@ const INITIAL_PROGRESS: UserProgress = {
 // In-memory cache for word bank to save Supabase Egress
 let cachedAllWords: Word[] | null = null;
 let cachedAllWordsTime: number = 0;
+let cachedWordCount: number = -1; // last known word count for lightweight change detection
 
 // Short-lived cache for class user IDs (avoids repeated user_progress queries within one refresh cycle)
 let cachedClassUserIds: { classId: string | null; userIds: string[]; time: number } | null = null;
@@ -88,6 +89,13 @@ async function getCachedWordsByIds(ids: string[]): Promise<Word[]> {
 export const storageService = {
   // No init needed for Supabase — DB is always ready
   init: () => { },
+
+  // Force clear the word cache so next getWords() fetches fresh data from Supabase
+  clearWordCache: () => {
+    cachedAllWords = null;
+    cachedAllWordsTime = 0;
+    cachedWordCount = -1;
+  },
 
   // --- Class Management ---
 
@@ -178,24 +186,45 @@ export const storageService = {
   // Get all words from Supabase (with in-memory caching to save Egress bandwidth)
   getWords: async (forceRefresh = false): Promise<Word[]> => {
     const now = Date.now();
-    // Cache for 1 hour
-    if (!forceRefresh && cachedAllWords && (now - cachedAllWordsTime < 1000 * 60 * 60)) {
-      return cachedAllWords;
+    const cacheAge = now - cachedAllWordsTime;
+
+    // If cache is fresh (< 1 hour) and no force refresh, do a lightweight count check
+    // to detect if new words were imported (COUNT query uses negligible egress)
+    if (!forceRefresh && cachedAllWords && cacheAge < 1000 * 60 * 60) {
+      const { count } = await supabase
+        .from('words')
+        .select('*', { count: 'exact', head: true });
+      if (count !== null && count === cachedWordCount) {
+        return cachedAllWords; // no change, use cache
+      }
+      // count changed — fall through to full reload
     }
 
-    const { data, error } = await supabase
-      .from('words')
-      .select(WORD_SELECT_COLS)
-      .order('created_at', { ascending: true });
+    // Paginated fetch — handles any project-level max-rows limit (default 1000)
+    const PAGE_SIZE = 1000;
+    let allRows: any[] = [];
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from('words')
+        .select(WORD_SELECT_COLS)
+        .order('created_at', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
 
-    if (error) {
-      console.error('Error fetching words:', error);
-      return cachedAllWords || [];
+      if (error) {
+        console.error('Error fetching words:', error);
+        return cachedAllWords || [];
+      }
+      const batch = data || [];
+      allRows = allRows.concat(batch);
+      if (batch.length < PAGE_SIZE) break; // last page
+      from += PAGE_SIZE;
     }
 
-    const words = (data || []).map(mapDbWordToWord);
+    const words = allRows.map(mapDbWordToWord);
     cachedAllWords = words;
     cachedAllWordsTime = now;
+    cachedWordCount = words.length;
     return words;
   },
 
