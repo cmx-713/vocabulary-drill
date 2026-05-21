@@ -2529,19 +2529,34 @@ export default function App() {
                       );
                     })}
 
-                    {activeCategory === 'CET4' && CET_SETS.CET4.map((set) => (
-                      <UnitCard
-                        key={set}
-                        title={set}
-                        count={words.filter(w => w.unit === set).length}
-                        isAvailable={words.filter(w => w.unit === set).length > 0}
-                        onClick={() => {
-                          if (words.filter(w => w.unit === set).length > 0) { setPendingUnit(set); }
-                        }}
-                      />
-                    ))}
+                    {activeCategory === 'CET4' && (() => {
+                      const dynamicSets = Array.from(new Set(words.filter(w => w.unit.startsWith('CET-4')).map(w => w.unit)));
+                      const allSets = Array.from(new Set([...CET_SETS.CET4, ...dynamicSets])).sort((a, b) => {
+                        const numA = parseInt(a.match(/Set (\d+)/)?.[1] || '999');
+                        const numB = parseInt(b.match(/Set (\d+)/)?.[1] || '999');
+                        return numA - numB;
+                      });
+                      return allSets.map((set) => (
+                        <UnitCard
+                          key={set}
+                          title={set}
+                          count={words.filter(w => w.unit === set).length}
+                          isAvailable={words.filter(w => w.unit === set).length > 0}
+                          onClick={() => {
+                            if (words.filter(w => w.unit === set).length > 0) { setPendingUnit(set); }
+                          }}
+                        />
+                      ));
+                    })()}
 
-                    {activeCategory === 'CET6' && CET_SETS.CET6.map((set) => (
+                    {activeCategory === 'CET6' && (() => {
+                      const dynamicSets = Array.from(new Set(words.filter(w => w.unit.startsWith('CET-6')).map(w => w.unit)));
+                      const allSets = Array.from(new Set([...CET_SETS.CET6, ...dynamicSets])).sort((a, b) => {
+                        const numA = parseInt(a.match(/Set (\d+)/)?.[1] || '999');
+                        const numB = parseInt(b.match(/Set (\d+)/)?.[1] || '999');
+                        return numA - numB;
+                      });
+                      return allSets.map((set) => (
                       <UnitCard
                         key={set}
                         title={set}
@@ -2551,7 +2566,8 @@ export default function App() {
                           if (words.filter(w => w.unit === set).length > 0) { setPendingUnit(set); }
                         }}
                       />
-                    ))}
+                      ));
+                    })()}
                   </div>
                 </div>
               </div>

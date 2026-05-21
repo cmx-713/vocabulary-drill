@@ -200,7 +200,8 @@ export const storageService = {
       // count changed — fall through to full reload
     }
 
-    // Paginated fetch — handles any project-level max-rows limit (default 1000)
+    // Paginated fetch — robust against any project-level max-rows limit
+    // Keep fetching until an empty batch is returned (true end of data)
     const PAGE_SIZE = 1000;
     let allRows: any[] = [];
     let from = 0;
@@ -216,9 +217,9 @@ export const storageService = {
         return cachedAllWords || [];
       }
       const batch = data || [];
+      if (batch.length === 0) break; // no more rows
       allRows = allRows.concat(batch);
-      if (batch.length < PAGE_SIZE) break; // last page
-      from += PAGE_SIZE;
+      from += batch.length; // advance by actual rows received (not requested PAGE_SIZE)
     }
 
     const words = allRows.map(mapDbWordToWord);
